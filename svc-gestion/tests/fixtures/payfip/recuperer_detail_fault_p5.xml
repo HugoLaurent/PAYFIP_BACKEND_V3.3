@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/">
+  <soapenv:Body>
+    <soapenv:Fault>
+      <faultcode>soapenv:Server</faultcode>
+      <faultstring>FonctionnelleErreur</faultstring>
+      <detail>
+        <ns2:FonctionnelleErreur xmlns:ns2="http://securite.service.tpa.cp.finances.gouv.fr/services/mas_securite/contrat_paiement_securise/PaiementSecuriseService">
+          <code>P5</code>
+          <descriptif/>
+          <libelle>Résultat de la transaction non connu.</libelle>
+          <severite>2</severite>
+        </ns2:FonctionnelleErreur>
+      </detail>
+    </soapenv:Fault>
+  </soapenv:Body>
+</soapenv:Envelope>

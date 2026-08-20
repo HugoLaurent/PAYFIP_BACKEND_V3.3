@@ -1,0 +1,154 @@
+# Backend PAYFIP — les 6 services applicatifs, en un seul projet Compose
+# (ils se parlent constamment en pair-à-pair, contrairement aux autres
+# apps du serveur qui sont indépendantes les unes des autres).
+#
+# Aucun port publié ici, ni en dev ni en prod : les services ne se
+# joignent que par leur nom de conteneur sur le réseau `payfip-internal`
+# (créé par ce fichier). Le Postgres central partagé est un projet
+# externe séparé (voir deploy/postgres/), rejoint via le réseau externe
+# `db` uniquement en prod (docker-compose.prod.yml).
+#
+# Lancement prod :
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+
+services:
+  gateway:
+    build:
+      context: ../gateway
+    container_name: gateway
+    restart: unless-stopped
+    env_file: ./env/gateway.env
+    environment:
+      # Le conteneur n'a pas de sortie IPv6 fonctionnelle, mais la
+      # résolution DNS système renvoie parfois une adresse AAAA en
+      # priorité pour des hôtes externes réels (SMTP M365, PayFiP) —
+      # Node tente alors cette adresse et échoue (ENETUNREACH). On force
+      # IPv4 en priorité pour toute résolution DNS sortante.
+      NODE_OPTIONS: --dns-result-order=ipv4first
+      NODE_ENV: production
+      HOST: 0.0.0.0
+      PORT: "3000"
+      SVC_AUTH_BASE_URL: http://svc-auth:3334
+      SVC_GESTION_BASE_URL: http://svc-gestion:3333
+      SVC_BILLETTERIE_BASE_URL: http://svc-billetterie:3335
+      SVC_FACTURES_BASE_URL: http://svc-factures:3337
+      SVC_MAIL_BASE_URL: http://svc-mail:3339
+    networks:
+      - payfip-internal
+
+  svc-auth:
+    build:
+      context: ../svc-auth
+    container_name: svc-auth
+    restart: unless-stopped
+    env_file: ./env/svc-auth.env
+    environment:
+      # Le conteneur n'a pas de sortie IPv6 fonctionnelle, mais la
+      # résolution DNS système renvoie parfois une adresse AAAA en
+      # priorité pour des hôtes externes réels (SMTP M365, PayFiP) —
+      # Node tente alors cette adresse et échoue (ENETUNREACH). On force
+      # IPv4 en priorité pour toute résolution DNS sortante.
+      NODE_OPTIONS: --dns-result-order=ipv4first
+      NODE_ENV: production
+      HOST: 0.0.0.0
+      PORT: "3334"
+      DB_HOST: postgres
+      DB_PORT: "5432"
+    networks:
+      - payfip-internal
+
+  svc-billetterie:
+    build:
+      context: ../svc-billetterie
+    container_name: svc-billetterie
+    restart: unless-stopped
+    env_file: ./env/svc-billetterie.env
+    environment:
+      # Le conteneur n'a pas de sortie IPv6 fonctionnelle, mais la
+      # résolution DNS système renvoie parfois une adresse AAAA en
+      # priorité pour des hôtes externes réels (SMTP M365, PayFiP) —
+      # Node tente alors cette adresse et échoue (ENETUNREACH). On force
+      # IPv4 en priorité pour toute résolution DNS sortante.
+      NODE_OPTIONS: --dns-result-order=ipv4first
+      NODE_ENV: production
+      HOST: 0.0.0.0
+      PORT: "3335"
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      SVC_GESTION_BASE_URL: http://svc-gestion:3333
+      SVC_MAIL_BASE_URL: http://svc-mail:3339
+      SVC_AUTH_BASE_URL: http://svc-auth:3334
+      SELF_BASE_URL: http://svc-billetterie:3335
+    networks:
+      - payfip-internal
+
+  svc-factures:
+    build:
+      context: ../svc-factures
+    container_name: svc-factures
+    restart: unless-stopped
+    env_file: ./env/svc-factures.env
+    environment:
+      # Le conteneur n'a pas de sortie IPv6 fonctionnelle, mais la
+      # résolution DNS système renvoie parfois une adresse AAAA en
+      # priorité pour des hôtes externes réels (SMTP M365, PayFiP) —
+      # Node tente alors cette adresse et échoue (ENETUNREACH). On force
+      # IPv4 en priorité pour toute résolution DNS sortante.
+      NODE_OPTIONS: --dns-result-order=ipv4first
+      NODE_ENV: production
+      HOST: 0.0.0.0
+      PORT: "3337"
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      SVC_GESTION_BASE_URL: http://svc-gestion:3333
+      SVC_AUTH_BASE_URL: http://svc-auth:3334
+      SVC_MAIL_BASE_URL: http://svc-mail:3339
+      SELF_BASE_URL: http://svc-factures:3337
+    networks:
+      - payfip-internal
+
+  svc-gestion:
+    build:
+      context: ../svc-gestion
+    container_name: svc-gestion
+    restart: unless-stopped
+    env_file: ./env/svc-gestion.env
+    environment:
+      # Le conteneur n'a pas de sortie IPv6 fonctionnelle, mais la
+      # résolution DNS système renvoie parfois une adresse AAAA en
+      # priorité pour des hôtes externes réels (SMTP M365, PayFiP) —
+      # Node tente alors cette adresse et échoue (ENETUNREACH). On force
+      # IPv4 en priorité pour toute résolution DNS sortante.
+      NODE_OPTIONS: --dns-result-order=ipv4first
+      NODE_ENV: production
+      HOST: 0.0.0.0
+      PORT: "3333"
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      SVC_AUTH_BASE_URL: http://svc-auth:3334
+    networks:
+      - payfip-internal
+
+  svc-mail:
+    build:
+      context: ../svc-mail
+    container_name: svc-mail
+    restart: unless-stopped
+    env_file: ./env/svc-mail.env
+    environment:
+      # Le conteneur n'a pas de sortie IPv6 fonctionnelle, mais la
+      # résolution DNS système renvoie parfois une adresse AAAA en
+      # priorité pour des hôtes externes réels (SMTP M365, PayFiP) —
+      # Node tente alors cette adresse et échoue (ENETUNREACH). On force
+      # IPv4 en priorité pour toute résolution DNS sortante.
+      NODE_OPTIONS: --dns-result-order=ipv4first
+      NODE_ENV: production
+      HOST: 0.0.0.0
+      PORT: "3339"
+      DB_HOST: postgres
+      DB_PORT: "5432"
+    networks:
+      - payfip-internal
+
+networks:
+  payfip-internal:

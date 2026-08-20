@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/">
+  <soapenv:Body>
+    <ns2:recupererDetailPaiementSecuriseResponse xmlns:ns2="http://securite.service.tpa.cp.finances.gouv.fr/services/mas_securite/contrat_paiement_securise/PaiementSecuriseService">
+      <return>
+        <dattrans>19112015</dattrans>
+        <exer>2015</exer>
+        <heurtrans>1735</heurtrans>
+        <idop>81bdf4c0-8edb-11e5-99d5-00000a634c44</idop>
+        <mel>gerard.riviere@dgfip.finances.gouv.fr</mel>
+        <montant>1500</montant>
+        <numauto>A55A</numauto>
+        <numcli>006270</numcli>
+        <objet>test</objet>
+        <refdet>123456789</refdet>
+        <resultrans>P</resultrans>
+        <saisie>T</saisie>
+      </return>
+    </ns2:recupererDetailPaiementSecuriseResponse>
+  </soapenv:Body>
+</soapenv:Envelope>

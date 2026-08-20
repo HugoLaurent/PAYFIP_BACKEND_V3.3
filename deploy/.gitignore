@@ -1,0 +1,4 @@
+env/*.env
+postgres/.env
+npm/data
+npm/letsencrypt

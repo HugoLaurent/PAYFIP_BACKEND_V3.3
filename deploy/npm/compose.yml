@@ -1,0 +1,21 @@
+# nginx-proxy-manager — reverse-proxy/TLS unique du serveur. Ports 80/443
+# publics ; l'UI d'admin (port 81) reste en loopback-only, accès via
+# tunnel SSH (ssh -L 81:127.0.0.1:81 <host>) — jamais exposée publiquement.
+services:
+  app:
+    image: jc21/nginx-proxy-manager:2.14.0
+    container_name: npm
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "127.0.0.1:81:81"
+    volumes:
+      - ./data:/data
+      - ./letsencrypt:/etc/letsencrypt
+    networks:
+      - proxy-net
+
+networks:
+  proxy-net:
+    external: true

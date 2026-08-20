@@ -1,0 +1,12 @@
+node_modules
+build
+tmp
+tests
+bin/test.ts
+.env
+.env.*
+!.env.example
+.git
+.vscode
+.idea
+*.log

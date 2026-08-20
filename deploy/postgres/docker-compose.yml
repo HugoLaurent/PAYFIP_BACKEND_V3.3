@@ -1,0 +1,33 @@
+# PostgreSQL central partagé pour le backend PAYFIP (VPS dédié).
+# Réseau externe `db` : chaque service PAYFIP le rejoint (voir
+# ../docker-compose.prod.yml) et se connecte au conteneur `postgres`.
+# Les 5 bases applicatives (+ un user dédié chacune) sont créées au
+# premier démarrage par les scripts de ./init/ (ne s'exécutent que si le
+# volume de données est vide).
+services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: postgres
+    restart: unless-stopped
+    env_file:
+      - ./.env
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - db
+    security_opt:
+      - no-new-privileges:true
+
+networks:
+  db:
+    external: true
+
+volumes:
+  pgdata:
+    name: payfip_postgres_pgdata

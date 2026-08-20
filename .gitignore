@@ -1,0 +1,44 @@
+# Références historiques (4D, V1) — pas du code du projet V3
+back_4D/
+back_V1/
+
+# Simulateurs de dev/test — hors périmètre de la revue
+fake-payfip/
+fake-aregie/
+
+# Front de test, pas le front final
+test-frontend/
+
+# Outils locaux, pas du code du projet
+dev/
+test-console.html
+
+# Dépendances et builds AdonisJS/Vite
+node_modules
+build
+dist
+package-lock.json
+**/tmp/*
+!**/tmp/.gitkeep
+.adonisjs
+
+# Secrets
+.env
+.env.local
+.env.production.local
+.env.development.local
+
+# Frontend assets compilés
+**/public/assets
+
+# Logs
+npm-debug.log
+yarn-error.log
+
+# Éditeurs
+.fleet
+.idea
+.vscode
+
+# Plateforme
+.DS_Store

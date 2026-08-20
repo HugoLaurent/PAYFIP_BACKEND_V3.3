@@ -1,0 +1,16 @@
+# Portainer CE — gestion des conteneurs. UI en loopback-only (accès via
+# tunnel SSH : ssh -L 9443:127.0.0.1:9443 <host>), jamais exposée
+# publiquement — pas de réseau proxy-net ici.
+services:
+  portainer:
+    image: portainer/portainer-ce:2.39.2
+    container_name: portainer
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:9443:9443"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - portainer_data:/data
+
+volumes:
+  portainer_data:

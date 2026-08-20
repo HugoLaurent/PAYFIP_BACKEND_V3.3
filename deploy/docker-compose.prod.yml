@@ -1,0 +1,56 @@
+# Override de PRODUCTION (VPS).
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+#
+# Ajoute le réseau externe `db` (Postgres central partagé, voir
+# deploy/postgres/) à tous les services, et `proxy-net` (nginx-proxy-manager,
+# voir deploy/npm/) au seul `gateway` — c'est l'unique point d'entrée public,
+# les 5 autres services ne sont joignables que depuis `payfip-internal`.
+#
+# Le réseau `networks:` d'un service fusionne par union des clés entre les
+# fichiers (mapping, pas une liste) : le `payfip-internal` du fichier de
+# base est conservé, `db`/`proxy-net` s'y ajoutent — aucun des deux
+# fichiers n'a besoin de tout redéclarer.
+
+services:
+  gateway:
+    networks:
+      - db
+      - proxy-net
+    security_opt:
+      - no-new-privileges:true
+
+  svc-auth:
+    networks:
+      - db
+    security_opt:
+      - no-new-privileges:true
+
+  svc-billetterie:
+    networks:
+      - db
+    security_opt:
+      - no-new-privileges:true
+
+  svc-factures:
+    networks:
+      - db
+    security_opt:
+      - no-new-privileges:true
+
+  svc-gestion:
+    networks:
+      - db
+    security_opt:
+      - no-new-privileges:true
+
+  svc-mail:
+    networks:
+      - db
+    security_opt:
+      - no-new-privileges:true
+
+networks:
+  db:
+    external: true
+  proxy-net:
+    external: true

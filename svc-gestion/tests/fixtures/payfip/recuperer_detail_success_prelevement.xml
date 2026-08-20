@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/">
+  <soapenv:Body>
+    <ns2:recupererDetailPaiementSecuriseResponse xmlns:ns2="http://securite.service.tpa.cp.finances.gouv.fr/services/mas_securite/contrat_paiement_securise/PaiementSecuriseService">
+      <return>
+        <dattrans>03082026</dattrans>
+        <exer>2026</exer>
+        <heurtrans>0912</heurtrans>
+        <idop>4b0eb5b0-b335-11e2-9219-001fe256bdfe</idop>
+        <mel>usager@example.org</mel>
+        <montant>4800</montant>
+        <numauto>OP0000000000123456</numauto>
+        <numcli>006271</numcli>
+        <objet>Forfait urgences</objet>
+        <refdet>BILL00000042</refdet>
+        <resultrans>V</resultrans>
+        <saisie>T</saisie>
+      </return>
+    </ns2:recupererDetailPaiementSecuriseResponse>
+  </soapenv:Body>
+</soapenv:Envelope>

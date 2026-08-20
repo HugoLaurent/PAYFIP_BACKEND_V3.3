@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/">
+  <soapenv:Body>
+    <soapenv:Fault>
+      <faultcode>soapenv:Server</faultcode>
+      <faultstring>TechDysfonctionnementErreur</faultstring>
+      <detail>
+        <ns2:TechDysfonctionnementErreur xmlns:ns2="http://securite.service.tpa.cp.finances.gouv.fr/services/mas_securite/contrat_paiement_securise/PaiementSecuriseService">
+          <code>999</code>
+          <descriptif>Erreur technique interne</descriptif>
+          <libelle>Erreur technique</libelle>
+          <severite>3</severite>
+        </ns2:TechDysfonctionnementErreur>
+      </detail>
+    </soapenv:Fault>
+  </soapenv:Body>
+</soapenv:Envelope>
