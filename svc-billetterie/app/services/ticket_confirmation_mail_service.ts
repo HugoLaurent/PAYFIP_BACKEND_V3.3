@@ -1,8 +1,10 @@
 import { DateTime } from 'luxon'
 import logger from '@adonisjs/core/services/logger'
+import env from '#start/env'
 import type Order from '#models/order'
 import type Ticket from '#models/ticket'
 import { sendMail } from '#services/svc_mail_client'
+import { fetchServiceStatus } from '#services/svc_auth_client'
 import { generateOrderTicketsPdf } from '#services/ticket_pdf_service'
 import FailedTicketMail from '#models/failed_ticket_mail'
 
@@ -14,6 +16,10 @@ export async function sendTicketConfirmationEmail(order: Order, tickets: Ticket[
   const billetsSummary = [...countByType.entries()]
     .map(([type, count]) => `${count} x ${type}`)
     .join(', ')
+
+  // Dégrade vers un en-tête générique si svc-auth ne répond pas — jamais
+  // une erreur d'envoi pour un habillage visuel.
+  const identity = await fetchServiceStatus(order.orgId, order.serviceId).catch(() => null)
 
   try {
     const attachments = [
@@ -33,6 +39,11 @@ export async function sendTicketConfirmationEmail(order: Order, tickets: Ticket[
         visitDate: order.visitDate.toFormat('dd/MM/yyyy'),
         billetsSummary,
         totalAmountCents: order.totalAmountCents,
+        serviceName: identity?.name,
+        orgName: identity?.orgName ?? undefined,
+        logoUrl: identity?.hasLogo
+          ? `${env.get('PAYFIP_PUBLIC_BASE_URL')}/services/${order.serviceId}/logo`
+          : undefined,
       },
       attachments,
     })

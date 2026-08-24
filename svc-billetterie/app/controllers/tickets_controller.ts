@@ -5,6 +5,7 @@ import Ticket from '#models/ticket'
 import Scan, { type ScanResult } from '#models/scan'
 import { scanTicketValidator, listScansValidator } from '#validators/scan_ticket'
 import { decodeTicketCode } from '#services/ticket_code_service'
+import { encodeOrderCode } from '#services/order_code_service'
 import { agentLabel } from '#services/agent_label_service'
 
 export default class TicketsController {
@@ -55,6 +56,9 @@ export default class TicketsController {
       return ctx.response.status(409).send({
         result: 'already_consumed',
         ticket: { id: ticket.id, tariffType: ticket.tariffType, visitDate: ticket.visitDate.toISODate() },
+        orderCode: encodeOrderCode(ticket.orderId),
+        consumedAt: ticket.consumedAt?.toISO() ?? null,
+        consumedByLabel: ticket.consumedByLabel,
       })
     }
 
@@ -73,9 +77,11 @@ export default class TicketsController {
 
     if (ticket.visitDate.toISODate() !== DateTime.now().toISODate()) {
       await logScan(ticket.id, ticket.serviceId, ticket.orgId, agentId, label, 'invalid_date', null)
-      return ctx.response
-        .status(409)
-        .send({ result: 'invalid_date', visitDate: ticket.visitDate.toISODate() })
+      return ctx.response.status(409).send({
+        result: 'invalid_date',
+        visitDate: ticket.visitDate.toISODate(),
+        tariffType: ticket.tariffType,
+      })
     }
 
     // Transition atomique : sans ça, deux scans simultanés du même billet
@@ -115,6 +121,11 @@ export default class TicketsController {
         tariffType: ticket.tariffType,
         visitDate: ticket.visitDate.toISODate(),
       },
+      // Permet au front de proposer directement les autres billets de la
+      // même commande (famille/groupe) sans que l'agent ait besoin de
+      // scanner un QR de commande séparé — même endpoint /orders/scan
+      // que ce code alimente déjà.
+      orderCode: encodeOrderCode(ticket.orderId),
     })
   }
 

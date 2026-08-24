@@ -24,6 +24,10 @@ export default await Env.create(new URL('../', import.meta.url), {
   SVC_MAIL_BASE_URL: Env.schema.string({ format: 'url', tld: false }),
   SVC_AUTH_BASE_URL: Env.schema.string({ format: 'url', tld: false }),
   SELF_BASE_URL: Env.schema.string({ format: 'url', tld: false }),
+  // Domaine public (pas l'URL interne docker) — pour construire des liens
+  // et images atteignables depuis un client mail, comme le logo du
+  // service embarqué dans l'email de confirmation.
+  PAYFIP_PUBLIC_BASE_URL: Env.schema.string({ format: 'url', tld: false }),
 
   OTP_MODE: Env.schema.enum(['fake', 'real'] as const),
 

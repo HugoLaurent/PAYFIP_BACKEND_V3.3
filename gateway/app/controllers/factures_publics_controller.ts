@@ -3,8 +3,16 @@ import env from '#start/env'
 import { proxyRequest } from '#services/proxy_service'
 
 const base = () => env.get('SVC_FACTURES_BASE_URL')
+const authBase = () => env.get('SVC_AUTH_BASE_URL')
 
 export default class FacturesPublicsController {
+  /** GET /factures/services/lookup/:slug — même lookup générique que la billetterie, juste un point d'entrée différent. */
+  async serviceLookup(ctx: HttpContext) {
+    await proxyRequest(ctx, {
+      targetUrl: `${authBase()}/services/lookup/${ctx.params.slug}`,
+    })
+  }
+
   async otpRequest(ctx: HttpContext) {
     const orgId = String(ctx.request.input('orgId'))
     await proxyRequest(ctx, {

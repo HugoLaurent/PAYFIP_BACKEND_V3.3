@@ -24,6 +24,9 @@ export default await Env.create(new URL('../', import.meta.url), {
   SVC_MAIL_BASE_URL: Env.schema.string({ format: 'url', tld: false }),
   SVC_AUTH_BASE_URL: Env.schema.string({ format: 'url', tld: false }),
   SELF_BASE_URL: Env.schema.string({ format: 'url', tld: false }),
+  // Domaine public (pas l'URL interne docker) — pour construire le logo du
+  // service embarqué dans l'email de confirmation de paiement.
+  PAYFIP_PUBLIC_BASE_URL: Env.schema.string({ format: 'url', tld: false }),
 
   AREGIE_API_KEYS: Env.schema.string(),
 

@@ -35,6 +35,12 @@ router
   .patch('/auth/services/:id', [ProfileController, 'updateService'])
   .use(middleware.clientAuth())
 router
+  .post('/auth/services/:id/closures', [ProfileController, 'createServiceClosure'])
+  .use(middleware.clientAuth())
+router
+  .delete('/auth/services/:id/closures/:closureId', [ProfileController, 'deleteServiceClosure'])
+  .use(middleware.clientAuth())
+router
   .post('/auth/services/:id/logo', [ProfileController, 'uploadServiceLogo'])
   .use(middleware.clientAuth())
 router
@@ -81,6 +87,7 @@ router.post('/billetterie/orders/by-reference/:reference/retry-payment', [
   'retryOrderPayment',
 ])
 
+router.get('/factures/services/lookup/:slug', [FacturesPublicsController, 'serviceLookup'])
 router.post('/factures/otp/request', [FacturesPublicsController, 'otpRequest'])
 router.post('/factures/otp/verify', [FacturesPublicsController, 'otpVerify'])
 router.post('/factures/verify', [FacturesPublicsController, 'verify'])
@@ -135,8 +142,10 @@ router
   .group(() => {
     router.get('/staff/organizations', [StaffController, 'listOrganizations'])
     router.post('/staff/organizations', [StaffController, 'createOrganization'])
+    router.patch('/staff/organizations/:id', [StaffController, 'updateOrganization'])
     router.post('/staff/organizations/:id/services', [StaffController, 'createService'])
     router.get('/staff/services', [StaffController, 'listServices'])
+    router.patch('/staff/services/:id', [StaffController, 'updateService'])
     router.get('/staff/users', [StaffController, 'listUsers'])
     router.get('/staff/orders', [StaffController, 'listOrders'])
     router.get('/staff/invoices', [StaffController, 'listInvoices'])

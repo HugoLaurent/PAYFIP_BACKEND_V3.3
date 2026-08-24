@@ -5,6 +5,11 @@ export interface OtpCodeEmailData {
   ttlMinutes: number
 }
 
+// Même règle que les autres templates : accent bleu AREGIE, corail
+// réservé au bouton d'action du parcours d'achat web.
+const AREGIE_BLUE = '#0080c0'
+const BLUE_TINT = '#bfe3f4'
+
 export function renderOtpCodeEmail(data: OtpCodeEmailData): string {
   return `<!DOCTYPE html>
 <html lang="fr">
@@ -13,48 +18,42 @@ export function renderOtpCodeEmail(data: OtpCodeEmailData): string {
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>Vérification Email</title>
 </head>
-<body style="margin: 0; padding: 0; background-color: #f9fafb; font-family: 'Segoe UI', Roboto, sans-serif; color: #111827;">
-  <table width="100%" cellpadding="0" cellspacing="0" style="background-color: #f9fafb; padding: 32px 0;">
+<body style="margin:0; padding:0; background-color:#f2f5fb; font-family:'Segoe UI', Roboto, sans-serif; color:#121b29;">
+  <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#f2f5fb; padding:32px 0;">
     <tr>
       <td align="center">
-        <table width="600" cellpadding="0" cellspacing="0" style="background-color: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);">
+        <table width="600" cellpadding="0" cellspacing="0" border="0" style="width:600px; background-color:#ffffff; border-radius:16px; overflow:hidden; box-shadow:0 1px 3px rgba(18,27,41,.08);">
 
-          <!-- Logo -->
+          <tr><td height="6" style="height:6px; background-color:${AREGIE_BLUE}; line-height:6px; font-size:0;">&nbsp;</td></tr>
+
           <tr>
-            <td style="text-align: center; padding: 24px;">
-              <img src="data:image/png;base64,${logoBase64}" alt="AREGIE" style="max-width: 160px; height: auto;"/>
+            <td align="center" style="padding:24px 32px 0;">
+              <img src="data:image/png;base64,${logoBase64}" alt="AREGIE" style="max-width:140px; height:auto;" />
             </td>
           </tr>
 
-          <!-- Header -->
-          <tr>
-            <td style="padding: 24px 32px; text-align: center; background-color: #1d4ed8;">
-              <h1 style="margin: 0; color: #ffffff; font-size: 22px;">Validation de votre email</h1>
-            </td>
-          </tr>
+          <tr><td style="padding:6px 32px 0; text-align:center; font-size:11px; font-weight:600; letter-spacing:1.4px; color:#7b8189;">AREGIE · VÉRIFICATION</td></tr>
+          <tr><td style="padding:14px 32px 0; text-align:center; font-size:22px; font-weight:800; line-height:28px; color:#121b29;">Votre code de vérification</td></tr>
+          <tr><td style="padding:8px 44px 0; text-align:center; font-size:15px; line-height:23px; color:#4f5661;">Saisissez ce code pour continuer votre paiement.</td></tr>
 
-          <!-- Body -->
-          <tr>
-            <td style="padding: 32px;">
-              <p style="margin-bottom: 16px;">Bonjour,</p>
-              <p style="margin-bottom: 16px;">
-                Merci pour votre demande. Voici votre code de vérification :
-              </p>
-              <div style="font-size: 24px; font-weight: bold; letter-spacing: 4px; margin: 24px 0; text-align: center; color: #1d4ed8;">
-                <code>${data.code}</code>
-              </div>
-              <p style="margin-bottom: 0;">
-                Ce code est valable pendant ${data.ttlMinutes} minutes. Si vous n'avez pas initié cette demande, ignorez simplement ce message.
-              </p>
-            </td>
-          </tr>
+          <tr><td align="center" style="padding:26px 32px 0;">
+            <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#121b29; border-radius:14px;">
+              <tr><td align="center" style="padding:26px 20px 22px;">
+                <div style="font-family:Consolas,'Courier New',monospace; font-size:40px; font-weight:700; letter-spacing:12px; line-height:48px; color:#ffffff; padding-left:12px;">${data.code}</div>
+                <div style="padding-top:10px; font-size:13px; font-weight:600; color:${BLUE_TINT};">Valable ${data.ttlMinutes} minutes</div>
+              </td></tr>
+            </table>
+          </td></tr>
 
-          <!-- Footer -->
-          <tr>
-            <td style="padding: 16px 32px; background-color: #f1f5f9; text-align: center; color: #6b7280; font-size: 12px;">
-              Un service de paiement sécurisé proposé et propulsé par <strong>AREGIE</strong>
-            </td>
-          </tr>
+          <tr><td align="center" style="padding:18px 44px 0; font-size:14px; line-height:22px; color:#4f5661;">Nos codes ne contiennent que des chiffres — jamais de lettres, donc aucune confusion possible entre O et 0 ou entre I et 1.</td></tr>
+
+          <tr><td style="padding:24px 32px 0;">
+            <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#f2f5fb; border-radius:12px;">
+              <tr><td style="padding:16px 20px; font-size:13px; line-height:20px; color:#4f5661;">Vous n'avez rien demandé ? Ignorez cet email : sans ce code, aucun paiement ne peut aboutir. Ne le transmettez à personne, même à un agent.</td></tr>
+            </table>
+          </td></tr>
+
+          <tr><td align="right" style="padding:20px 32px; margin-top:24px; background-color:#f2f5fb; font-size:12px; line-height:19px; color:#7b8189;">Ne répondez pas à ce message.<br><a href="#" style="color:${AREGIE_BLUE}; text-decoration:none;">aregie.fr</a> · Mentions légales</td></tr>
 
         </table>
       </td>

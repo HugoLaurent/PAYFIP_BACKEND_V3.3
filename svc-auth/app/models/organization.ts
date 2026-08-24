@@ -19,6 +19,15 @@ export default class Organization extends BaseModel {
   @column()
   declare status: OrganizationStatus
 
+  // Posés ensemble à la suspension (voir OrganizationsController#update),
+  // vidés à la réactivation — même logique que Service#closedMessage,
+  // mais ici le message reste interne (staff), jamais montré au citoyen.
+  @column.dateTime()
+  declare suspendedAt: DateTime | null
+
+  @column()
+  declare suspendedMessage: string | null
+
   @column.dateTime({ autoCreate: true })
   declare createdAt: DateTime
 

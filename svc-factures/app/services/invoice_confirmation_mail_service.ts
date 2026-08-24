@@ -1,13 +1,21 @@
 import { DateTime } from 'luxon'
 import logger from '@adonisjs/core/services/logger'
+import env from '#start/env'
 import type Invoice from '#models/invoice'
 import { sendMail } from '#services/svc_mail_client'
+import { fetchServiceIdentity } from '#services/svc_auth_client'
 import FailedInvoiceMail from '#models/failed_invoice_mail'
 
 export async function sendInvoiceConfirmationEmail(invoice: Invoice): Promise<void> {
   if (!invoice.payerEmail) {
     return
   }
+
+  // serviceId peut être nul (dépôt non rattaché à un service précis) —
+  // l'email dégrade alors vers un en-tête générique, jamais une erreur.
+  const identity = invoice.serviceId
+    ? await fetchServiceIdentity(String(invoice.orgId), invoice.serviceId)
+    : null
 
   try {
     await sendMail({
@@ -18,6 +26,11 @@ export async function sendInvoiceConfirmationEmail(invoice: Invoice): Promise<vo
         objectLabel: invoice.objectLabel,
         amountCents: invoice.amountCents,
         clientNumber: invoice.clientNumber ?? undefined,
+        serviceName: identity?.name,
+        orgName: identity?.orgName ?? undefined,
+        logoUrl: identity?.hasLogo
+          ? `${env.get('PAYFIP_PUBLIC_BASE_URL')}/services/${invoice.serviceId}/logo`
+          : undefined,
       },
     })
 

@@ -23,10 +23,17 @@ export default class ProfileController {
       return ctx.response.status(404).send({ error: 'user_not_found' })
     }
 
-    const [services, servicePermissions, organization] = await Promise.all([
+    const organization = await Organization.find(user.orgId)
+    // Un organisme suspendu après coup coupe la session en cours au
+    // prochain rafraîchissement (au plus 20 min, voir AuthGate côté
+    // front) — même règle qu'au login, voir AuthController#login.
+    if (organization?.status !== 'active') {
+      return ctx.response.status(403).send({ error: 'organization_suspended' })
+    }
+
+    const [services, servicePermissions] = await Promise.all([
       user.getAccessibleServices(),
       user.servicePermissions(),
-      Organization.find(user.orgId),
     ])
 
     return ctx.response.send({

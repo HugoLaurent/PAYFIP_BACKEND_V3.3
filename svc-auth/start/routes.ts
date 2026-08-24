@@ -1,4 +1,3 @@
-
 import router from '@adonisjs/core/services/router'
 import { middleware } from '#start/kernel'
 
@@ -29,10 +28,13 @@ router
 
     router.get('/organizations', [OrganizationsController, 'index'])
     router.post('/organizations', [OrganizationsController, 'store'])
+    router.patch('/organizations/:id', [OrganizationsController, 'update'])
     router.post('/organizations/:id/services', [ServicesController, 'store'])
     router.get('/services', [ServicesController, 'index'])
     router.get('/services/:id', [ServicesController, 'show'])
     router.patch('/services/:id', [ServicesController, 'update'])
+    router.post('/services/:id/closures', [ServicesController, 'createClosure'])
+    router.delete('/services/:id/closures/:closureId', [ServicesController, 'deleteClosure'])
     router.post('/services/:id/logo', [ServicesController, 'uploadLogo'])
     router.post('/services/:id/cover', [ServicesController, 'uploadCoverImage'])
     router.delete('/services/:id/cover', [ServicesController, 'deleteCoverImage'])

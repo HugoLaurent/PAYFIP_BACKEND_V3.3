@@ -5,7 +5,7 @@ export const createOrderValidator = vine.compile(
   vine.object({
     serviceId: vine.number().positive(),
     email: vine.string().trim().email(),
-    visitDate: vine.date({ formats: ['YYYY-MM-DD'] }),
+    visitDate: vine.date({ formats: ['YYYY-MM-DD'] }).afterOrEqual('today'),
     tickets: vine
       .array(
         vine.object({
@@ -59,7 +59,7 @@ export const agentSaleValidator = vine.compile(
   vine.object({
     serviceId: vine.number().positive(),
     email: vine.string().trim().email(),
-    visitDate: vine.date({ formats: ['YYYY-MM-DD'] }),
+    visitDate: vine.date({ formats: ['YYYY-MM-DD'] }).afterOrEqual('today'),
     tickets: vine
       .array(
         vine.object({

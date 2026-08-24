@@ -6,6 +6,7 @@ import db from '@adonisjs/lucid/services/db'
 import Order from '#models/order'
 import OrderLine from '#models/order_line'
 import Ticket from '#models/ticket'
+import Scan from '#models/scan'
 import {
   createOrderValidator,
   agentSaleValidator,
@@ -23,7 +24,7 @@ import {
   listPaymentAttempts,
   SvcGestionError,
 } from '#services/svc_gestion_client'
-import { fetchServiceStatus } from '#services/svc_auth_client'
+import { fetchServiceStatus, isVisitDateInClosure, isVisitDateOpen } from '#services/svc_auth_client'
 import { agentLabel } from '#services/agent_label_service'
 import { generateTicketsForOrder } from '#services/ticket_generation_service'
 import { encodeTicketCode } from '#services/ticket_code_service'
@@ -48,7 +49,11 @@ export default class OrdersController {
    * billetterie confondus (jamais un appel par service : ça ne passerait
    * pas à l'échelle pour un organisme avec beaucoup de services). Un
    * admin voit tout l'organisme ; un agent seulement les services où il a
-   * canViewHistory.
+   * canViewHistory. Alimente le Dashboard : totaux du mois, comparaison
+   * au mois précédent, sparkline 14 jours, top services et flux
+   * d'activité récente (le nom du service n'est pas résolu ici — le
+   * front le fait via son `auth.services` déjà en mémoire, pour éviter un
+   * aller-retour vers svc-auth à chaque affichage du tableau de bord).
    */
   async stats(ctx: HttpContext) {
     const { orgId, role, servicePermissions, serviceIds } = ctx.internalAuth
@@ -60,23 +65,69 @@ export default class OrdersController {
       )
       if (allowedServiceIds.length === 0) {
         return ctx.response.send({
-          data: { monthRevenueCents: 0, monthTicketsSold: 0, monthTicketsScanned: 0 },
+          data: {
+            monthRevenueCents: 0,
+            monthTicketsSold: 0,
+            monthTicketsScanned: 0,
+            prevMonthRevenueCents: 0,
+            dailyRevenue: [],
+            topServices: [],
+            recentActivity: [],
+          },
         })
       }
     }
 
     const monthStart = DateTime.now().startOf('month')
+    const prevMonthStart = monthStart.minus({ months: 1 })
+    const sparklineStart = DateTime.now().minus({ days: 13 }).startOf('day')
+    // Le sparkline (14 derniers jours) peut chevaucher le mois précédent —
+    // une seule requête bornée à la plus ancienne des deux dates permet
+    // de dériver mois courant, mois précédent, top services et sparkline
+    // du même jeu de lignes plutôt que de répéter le scan de la table.
+    const queryStart = sparklineStart < prevMonthStart ? sparklineStart : prevMonthStart
 
-    const orderQuery = db
-      .from('orders')
-      .where('org_id', orgId)
+    const ordersQuery = Order.query()
+      .where('orgId', orgId)
       .where('status', 'confirmed')
-      .where('created_at', '>=', monthStart.toSQL()!)
-    if (allowedServiceIds) orderQuery.whereIn('service_id', allowedServiceIds)
-    const orderStats = await orderQuery
-      .sum('total_amount_cents as revenue')
-      .sum('qty_tickets as tickets')
-      .first()
+      .where('createdAt', '>=', queryStart.toJSDate())
+      .select('serviceId', 'totalAmountCents', 'qtyTickets', 'createdAt')
+    if (allowedServiceIds) ordersQuery.whereIn('serviceId', allowedServiceIds)
+    const orders = await ordersQuery
+
+    let monthRevenueCents = 0
+    let monthTicketsSold = 0
+    let prevMonthRevenueCents = 0
+    const byService = new Map<number, { revenueCents: number; ticketsSold: number }>()
+    const dailyMap = new Map<string, number>()
+
+    for (const o of orders) {
+      if (o.createdAt >= monthStart) {
+        monthRevenueCents += o.totalAmountCents
+        monthTicketsSold += o.qtyTickets
+        const entry = byService.get(o.serviceId) ?? { revenueCents: 0, ticketsSold: 0 }
+        entry.revenueCents += o.totalAmountCents
+        entry.ticketsSold += o.qtyTickets
+        byService.set(o.serviceId, entry)
+      } else if (o.createdAt >= prevMonthStart) {
+        prevMonthRevenueCents += o.totalAmountCents
+      }
+      if (o.createdAt >= sparklineStart) {
+        const key = o.createdAt.toFormat('yyyy-MM-dd')
+        dailyMap.set(key, (dailyMap.get(key) ?? 0) + o.totalAmountCents)
+      }
+    }
+
+    const topServices = [...byService.entries()]
+      .map(([serviceId, v]) => ({ serviceId, ...v }))
+      .sort((a, b) => b.revenueCents - a.revenueCents)
+      .slice(0, 5)
+
+    const dailyRevenue = Array.from({ length: 14 }, (_, i) => {
+      const date = sparklineStart.plus({ days: i })
+      const key = date.toFormat('yyyy-MM-dd')
+      return { date: key, revenueCents: dailyMap.get(key) ?? 0 }
+    })
 
     const scanQuery = db
       .from('tickets')
@@ -86,11 +137,50 @@ export default class OrdersController {
     if (allowedServiceIds) scanQuery.whereIn('service_id', allowedServiceIds)
     const scanStats = await scanQuery.count('* as total').first()
 
+    const recentOrdersQuery = Order.query()
+      .where('orgId', orgId)
+      .where('status', 'confirmed')
+      .orderBy('createdAt', 'desc')
+      .limit(8)
+    if (allowedServiceIds) recentOrdersQuery.whereIn('serviceId', allowedServiceIds)
+    const recentOrders = await recentOrdersQuery
+
+    const recentScansQuery = Scan.query()
+      .where('orgId', orgId)
+      .where('result', 'valid')
+      .orderBy('createdAt', 'desc')
+      .limit(8)
+    if (allowedServiceIds) recentScansQuery.whereIn('serviceId', allowedServiceIds)
+    const recentScans = await recentScansQuery
+
+    const recentActivity = [
+      ...recentOrders.map((o) => ({
+        type: 'order' as const,
+        serviceId: o.serviceId,
+        createdAt: o.createdAt.toISO(),
+        ticketCount: o.qtyTickets,
+        amountCents: o.totalAmountCents,
+        soldBy: o.soldBy,
+        paymentReference: o.paymentReference,
+      })),
+      ...recentScans.map((s) => ({
+        type: 'scan' as const,
+        serviceId: s.serviceId,
+        createdAt: s.createdAt.toISO(),
+      })),
+    ]
+      .sort((a, b) => ((a.createdAt ?? '') < (b.createdAt ?? '') ? 1 : -1))
+      .slice(0, 8)
+
     return ctx.response.send({
       data: {
-        monthRevenueCents: Number(orderStats?.revenue ?? 0),
-        monthTicketsSold: Number(orderStats?.tickets ?? 0),
+        monthRevenueCents,
+        monthTicketsSold,
         monthTicketsScanned: Number(scanStats?.total ?? 0),
+        prevMonthRevenueCents,
+        dailyRevenue,
+        topServices,
+        recentActivity,
       },
     })
   }
@@ -234,9 +324,24 @@ export default class OrdersController {
     const verified = await isEmailVerified(payload.email)
     if (!verified) return ctx.response.status(403).send({ error: 'email_not_otp_verified' })
 
-    const serviceStatus = await fetchServiceStatus(Number(orgId), payload.serviceId)
-    if (serviceStatus !== 'active') {
+    const serviceAvailability = await fetchServiceStatus(Number(orgId), payload.serviceId)
+    if (
+      !serviceAvailability ||
+      serviceAvailability.status !== 'active' ||
+      !serviceAvailability.isOpen
+    ) {
       return ctx.response.status(409).send({ error: 'service_closed' })
+    }
+    // Jours hebdo fermés + périodes de fermeture ponctuelles (voir
+    // OpeningScheduleManager côté admin) : ni l'un ni l'autre ne ferme la
+    // page (déjà vérifié ci-dessus via isOpen — une fermeture FUTURE n'y
+    // apparaît pas encore), seulement la date de visite précise choisie
+    // ici, qui elle peut très bien tomber dedans.
+    if (
+      !isVisitDateOpen(serviceAvailability.openingDays, payload.visitDate) ||
+      isVisitDateInClosure(serviceAvailability.closures, payload.visitDate)
+    ) {
+      return ctx.response.status(422).send({ error: 'visit_date_closed' })
     }
 
     let totals
@@ -376,9 +481,19 @@ export default class OrdersController {
     // service qu'un admin vient de fermer — le front masque déjà le
     // bouton de vente, mais l'API doit refuser elle-même, pas seulement
     // compter sur l'UI.
-    const serviceStatus = await fetchServiceStatus(Number(orgId), payload.serviceId)
-    if (serviceStatus !== 'active') {
+    const serviceAvailability = await fetchServiceStatus(Number(orgId), payload.serviceId)
+    if (
+      !serviceAvailability ||
+      serviceAvailability.status !== 'active' ||
+      !serviceAvailability.isOpen
+    ) {
       return ctx.response.status(409).send({ error: 'service_closed' })
+    }
+    if (
+      !isVisitDateOpen(serviceAvailability.openingDays, payload.visitDate) ||
+      isVisitDateInClosure(serviceAvailability.closures, payload.visitDate)
+    ) {
+      return ctx.response.status(422).send({ error: 'visit_date_closed' })
     }
 
     let totals
@@ -497,7 +612,10 @@ export default class OrdersController {
   async agentTicketsPdf(ctx: HttpContext) {
     const { orgId, role, servicePermissions, serviceIds } = ctx.internalAuth
 
-    const order = await Order.query().where('id', Number(ctx.params.id)).where('orgId', orgId).first()
+    const order = await Order.query()
+      .where('id', Number(ctx.params.id))
+      .where('orgId', orgId)
+      .first()
 
     if (!order) {
       return ctx.response.status(404).send({ error: 'order_not_found' })
@@ -569,6 +687,7 @@ export default class OrdersController {
           visitDate: t.visitDate.toISODate(),
           status: t.status,
           code: encodeTicketCode(t.id),
+          consumedAt: t.consumedAt?.toISO() ?? null,
         })),
       },
     })
@@ -594,7 +713,7 @@ export default class OrdersController {
   }
 
   /**
-   * GET /orders/:id/tickets/:ticketId/pdf — un PDF par billet, même garde
+   * GET /orders/:id/tickets/:ticketId/pdf, même garde
    * idOp+orgId que la lecture des billets.
    */
   async ticketPdf(ctx: HttpContext) {

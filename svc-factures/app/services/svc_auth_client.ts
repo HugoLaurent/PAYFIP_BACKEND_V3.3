@@ -46,3 +46,33 @@ export async function fetchServiceName(orgId: string, serviceId: number): Promis
     return null
   }
 }
+
+export interface ServiceIdentity {
+  name: string
+  orgName: string | null
+  hasLogo: boolean
+}
+
+/**
+ * Identité visuelle (nom, organisme, logo) pour l'email de confirmation
+ * de paiement — même route que fetchServiceName, juste une lecture plus
+ * complète de la réponse. `null` si le paiement n'est rattaché à aucun
+ * service (serviceId nul) ou que svc-auth ne répond pas : l'email dégrade
+ * alors vers un en-tête générique, jamais une erreur d'envoi.
+ */
+export async function fetchServiceIdentity(orgId: string, serviceId: number): Promise<ServiceIdentity | null> {
+  try {
+    const token = await mintFacturesJwt({ orgId, scope: 'factures', aud: 'svc-auth' })
+
+    const url = new URL(`${env.get('SVC_AUTH_BASE_URL')}/services/${serviceId}/label`)
+    url.searchParams.set('orgId', orgId)
+
+    const response = await fetchWithTimeout(url, { headers: { Authorization: `Bearer ${token}` } })
+    if (!response.ok) return null
+
+    const { data } = (await response.json()) as { data: ServiceIdentity }
+    return data
+  } catch {
+    return null
+  }
+}

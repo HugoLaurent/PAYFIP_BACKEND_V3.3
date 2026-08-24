@@ -23,6 +23,13 @@ export default class StaffController {
     })
   }
 
+  async updateOrganization(ctx: HttpContext) {
+    await proxyRequest(ctx, {
+      targetUrl: `${auth()}/organizations/${ctx.params.id}`,
+      jwt: { orgId: '', scope: 'staff', aud: 'svc-auth' },
+    })
+  }
+
   async createService(ctx: HttpContext) {
     await proxyRequest(ctx, {
       targetUrl: `${auth()}/organizations/${ctx.params.id}/services`,
@@ -35,6 +42,13 @@ export default class StaffController {
       targetUrl: `${auth()}/services`,
       jwt: { orgId: '', scope: 'staff', aud: 'svc-auth' },
       forwardQueryString: true,
+    })
+  }
+
+  async updateService(ctx: HttpContext) {
+    await proxyRequest(ctx, {
+      targetUrl: `${auth()}/services/${ctx.params.id}`,
+      jwt: { orgId: '', scope: 'staff', aud: 'svc-auth' },
     })
   }
 

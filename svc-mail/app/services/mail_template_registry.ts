@@ -20,6 +20,12 @@ const ticketConfirmationValidator = vine.compile(
     visitDate: vine.string().trim().minLength(1),
     billetsSummary: vine.string().trim().minLength(1),
     totalAmountCents: vine.number().positive(),
+    // Identité du service émetteur — absente seulement si svc-auth était
+    // injoignable au moment de l'envoi, l'email dégrade alors vers un
+    // en-tête générique plutôt que d'échouer.
+    serviceName: vine.string().trim().optional(),
+    orgName: vine.string().trim().optional(),
+    logoUrl: vine.string().trim().url().optional(),
   })
 )
 
@@ -29,6 +35,9 @@ const invoiceConfirmationValidator = vine.compile(
     objectLabel: vine.string().trim().minLength(1),
     amountCents: vine.number().positive(),
     clientNumber: vine.string().trim().optional(),
+    serviceName: vine.string().trim().optional(),
+    orgName: vine.string().trim().optional(),
+    logoUrl: vine.string().trim().url().optional(),
   })
 )
 

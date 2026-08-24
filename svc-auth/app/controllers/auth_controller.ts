@@ -21,14 +21,20 @@ export default class AuthController {
       return ctx.response.status(401).send({ error: 'invalid_credentials' })
     }
 
+    const organization = await Organization.find(user.orgId)
+    // Un organisme suspendu (staff) bloque la connexion de tous ses
+    // admins/agents — voir OrganizationsController#update.
+    if (organization?.status !== 'active') {
+      return ctx.response.status(403).send({ error: 'organization_suspended' })
+    }
+
     const passwordChangeRequired = isPasswordChangeRequired(user)
 
     user.lastLoginAt = DateTime.now()
     await user.save()
 
-    const [services, organization, servicePermissions] = await Promise.all([
+    const [services, servicePermissions] = await Promise.all([
       user.getAccessibleServices(),
-      Organization.find(user.orgId),
       user.servicePermissions(),
     ])
 

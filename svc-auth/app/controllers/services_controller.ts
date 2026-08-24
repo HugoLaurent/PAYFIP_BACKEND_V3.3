@@ -3,10 +3,16 @@ import { DateTime } from 'luxon'
 import type { HttpContext } from '@adonisjs/core/http'
 import vine from '@vinejs/vine'
 import Service from '#models/service'
+import ServiceClosure from '#models/service_closure'
 import Organization from '#models/organization'
 import UserServiceAssignment from '#models/user_service_assignment'
-import { createServiceValidator, updateServiceValidator } from '#validators/service'
+import {
+  createServiceValidator,
+  updateServiceValidator,
+  createServiceClosureValidator,
+} from '#validators/service'
 import { processCoverImage, processLogo } from '#services/image_processing_service'
+import { computeServiceAvailability } from '#services/service_availability_service'
 
 const lookupValidator = vine.compile(
   vine.object({
@@ -37,6 +43,10 @@ const SERVICE_LIST_COLUMNS = [
   'slug',
   'logoMimeType',
   'coverImageMimeType',
+  'openingDays',
+  'openingStartTime',
+  'openingEndTime',
+  'closedMessage',
 ] as const
 
 function serializeService(s: Service) {
@@ -50,6 +60,19 @@ function serializeService(s: Service) {
     slug: s.slug,
     hasLogo: s.logoMimeType !== null,
     hasCoverImage: s.coverImageMimeType !== null,
+    openingDays: s.openingDays,
+    openingStartTime: s.openingStartTime,
+    openingEndTime: s.openingEndTime,
+    closedMessage: s.closedMessage,
+  }
+}
+
+function serializeClosure(c: ServiceClosure) {
+  return {
+    id: c.id,
+    label: c.label,
+    startDate: c.startDate.toISODate(),
+    endDate: c.endDate.toISODate(),
   }
 }
 
@@ -76,11 +99,16 @@ export default class ServicesController {
     const { orgId: filterOrgId, q, page, perPage } = await ctx.request.validateUsing(listValidator)
 
     if (scope === 'staff') {
-      const query = Service.query().select(...SERVICE_LIST_COLUMNS).orderBy('id', 'desc')
+      const query = Service.query()
+        .select(...SERVICE_LIST_COLUMNS)
+        .orderBy('id', 'desc')
       if (filterOrgId) query.where('orgId', filterOrgId)
       if (q) query.whereILike('name', `%${q}%`)
       const services = await query.paginate(page ?? 1, perPage ?? 25)
-      return ctx.response.send({ data: services.all().map(serializeService), meta: services.getMeta() })
+      return ctx.response.send({
+        data: services.all().map(serializeService),
+        meta: services.getMeta(),
+      })
     }
 
     if (role === 'admin') {
@@ -90,7 +118,10 @@ export default class ServicesController {
         .orderBy('id', 'desc')
       if (q) query.whereILike('name', `%${q}%`)
       const services = await query.paginate(page ?? 1, perPage ?? 25)
-      return ctx.response.send({ data: services.all().map(serializeService), meta: services.getMeta() })
+      return ctx.response.send({
+        data: services.all().map(serializeService),
+        meta: services.getMeta(),
+      })
     }
 
     if (role === 'agent' && sub) {
@@ -107,7 +138,10 @@ export default class ServicesController {
       }
       if (q) query.whereILike('name', `%${q}%`)
       const services = await query.paginate(page ?? 1, perPage ?? 25)
-      return ctx.response.send({ data: services.all().map(serializeService), meta: services.getMeta() })
+      return ctx.response.send({
+        data: services.all().map(serializeService),
+        meta: services.getMeta(),
+      })
     }
 
     return ctx.response.status(403).send({ error: 'scope_not_allowed' })
@@ -125,13 +159,20 @@ export default class ServicesController {
     const service = await Service.query()
       .select(...SERVICE_LIST_COLUMNS)
       .where('id', Number(ctx.params.id))
+      .preload('closures')
       .first()
     if (!service) {
       return ctx.response.status(404).send({ error: 'service_not_found' })
     }
 
+    const serviceWithAvailability = {
+      ...serializeService(service),
+      closures: service.closures.map(serializeClosure),
+      ...computeServiceAvailability(service, service.closures),
+    }
+
     if (scope === 'staff') {
-      return ctx.response.send({ data: serializeService(service) })
+      return ctx.response.send({ data: serviceWithAvailability })
     }
 
     if (String(service.orgId) !== orgId) {
@@ -139,7 +180,7 @@ export default class ServicesController {
     }
 
     if (role === 'admin') {
-      return ctx.response.send({ data: serializeService(service) })
+      return ctx.response.send({ data: serviceWithAvailability })
     }
 
     if (role === 'agent' && sub) {
@@ -150,7 +191,7 @@ export default class ServicesController {
       if (!assignment) {
         return ctx.response.status(403).send({ error: 'scope_not_allowed' })
       }
-      return ctx.response.send({ data: serializeService(service) })
+      return ctx.response.send({ data: serviceWithAvailability })
     }
 
     return ctx.response.status(403).send({ error: 'scope_not_allowed' })
@@ -173,7 +214,8 @@ export default class ServicesController {
       return ctx.response.status(409).send({ error: 'numcli_already_used' })
     }
 
-    let slug = payload.slug ?? (payload.serviceType === 'billetterie' ? slugify(payload.name) : null)
+    let slug =
+      payload.slug ?? (payload.serviceType === 'billetterie' ? slugify(payload.name) : null)
     if (slug) {
       const existingSlug = await Service.findBy('slug', slug)
       if (existingSlug) {
@@ -215,14 +257,58 @@ export default class ServicesController {
    */
   async lookupBySlug(ctx: HttpContext) {
     const service = await Service.query()
-      .select('id', 'orgId', 'name', 'serviceType', 'status', 'slug')
+      .select(
+        'id',
+        'orgId',
+        'name',
+        'serviceType',
+        'status',
+        'slug',
+        'openingDays',
+        'openingStartTime',
+        'openingEndTime',
+        'closedMessage'
+      )
       .where('slug', ctx.params.slug)
-      .where('status', 'active')
+      .preload('closures')
+      .preload('organization')
       .first()
 
     if (!service) {
       return ctx.response.status(404).send({ error: 'service_not_found' })
     }
+
+    // Un service désactivé par l'organisme (status !== 'active', ex. via
+    // le bouton "Fermer" côté admin) doit afficher l'écran "Service
+    // fermé", pas "introuvable" — seul un slug qui ne correspond à aucun
+    // service reste un vrai 404. Pas de date de réouverture calculable
+    // ici (contrairement à une fermeture programmée) : c'est à l'organisme
+    // de réactiver le service manuellement. `closedMessage` (texte libre
+    // de l'organisme) est distinct de `closedReason` (label d'une période
+    // de fermeture programmée) — le front préfère l'un ou l'autre.
+    // Un organisme suspendu (staff) ferme TOUS ses services publics sans
+    // toucher au statut individuel de chacun — même effet que status
+    // !== 'active', mais sans exposer le message de fermeture propre au
+    // service (contexte différent, jamais montré au citoyen ici).
+    const orgSuspended = service.organization?.status !== 'active'
+    // Billetterie : les jours hebdo ne ferment jamais la page (voir
+    // service_availability_service.ts), seulement la date de visite
+    // choisie — d'où `openingDays` renvoyé à part, pour que le front
+    // grise/rejette les jours fermés dans le calendrier.
+    const availability =
+      service.status === 'active' && !orgSuspended
+        ? {
+            closedMessage: null,
+            ...computeServiceAvailability(service, service.closures, DateTime.now(), {
+              ignoreWeeklySchedule: service.serviceType === 'billetterie',
+            }),
+          }
+        : {
+            isOpen: false,
+            reopensAt: null,
+            closedReason: null,
+            closedMessage: orgSuspended ? null : service.closedMessage,
+          }
 
     return ctx.response.send({
       data: {
@@ -230,38 +316,114 @@ export default class ServicesController {
         serviceId: service.id,
         name: service.name,
         serviceType: service.serviceType,
+        openingDays: service.openingDays,
+        // Toutes les périodes (passées, en cours, futures) — le calendrier
+        // billetterie grise leurs dates quel que soit `isOpen` (qui, lui,
+        // ne reflète que la période EN COURS, voir computeServiceAvailability).
+        closures: service.closures.map(serializeClosure),
+        ...availability,
       },
     })
   }
 
   /**
-   * PATCH /services/:id — active/désactive UN service de SON organisme,
-   * déjà provisionné par AREGIE. Créer un nouveau service reste
-   * staff-only (voir store) : seul l'interrupteur appartient à
-   * l'organisme. Un admin peut toujours ; un agent seulement s'il a le
-   * droit "fermer les ventes" (canToggleService) SUR CE service précis.
+   * PATCH /services/:id — plusieurs usages indépendants sous la même
+   * route : activer/désactiver (statut) et/ou poser les horaires hebdo
+   * (admin ou agent avec canToggleService SUR CE service, même
+   * permission que le statut — c'est aussi une bascule d'exploitation),
+   * et/ou renommer le slug public (staff AREGIE uniquement — jamais
+   * l'organisme, même un admin : c'est nous qui provisionnons le lien
+   * public d'un service, pas eux). Créer un nouveau service reste
+   * staff-only (voir store()). Les périodes de fermeture ponctuelles ont
+   * leurs propres routes (createClosure/deleteClosure) — ce ne sont pas
+   * des champs du service mais une vraie collection, comme les tarifs côté
+   * billetterie.
    */
   async update(ctx: HttpContext) {
-    const { orgId, role, servicePermissions } = ctx.internalAuth
-    if (role !== 'admin' && !servicePermissions?.[ctx.params.id]?.canToggleService) {
-      return ctx.response.status(403).send({ error: 'permission_required' })
+    const { orgId, role, servicePermissions, scope } = ctx.internalAuth
+    // Le staff AREGIE administre tous les organismes depuis son panel
+    // (fermer/réouvrir n'importe quel service) — aucune des permissions
+    // ci-dessous (propres à l'auth d'un organisme) ne s'applique à lui,
+    // et il n'est pas filtré par orgId (son JWT n'en porte pas).
+    const isStaff = scope === 'staff'
+    const payload = await ctx.request.validateUsing(updateServiceValidator)
+
+    if (!isStaff) {
+      const changesOpeningSchedule =
+        payload.openingDays !== undefined ||
+        payload.openingStartTime !== undefined ||
+        payload.openingEndTime !== undefined
+
+      if (
+        (payload.status || changesOpeningSchedule) &&
+        role !== 'admin' &&
+        !servicePermissions?.[ctx.params.id]?.canToggleService
+      ) {
+        return ctx.response.status(403).send({ error: 'permission_required' })
+      }
+      // Contrairement au statut/horaires/message de fermeture (qui restent
+      // gérables par un admin d'organisme), le slug est staff-only — donc
+      // toujours refusé ici puisqu'on est déjà dans la branche !isStaff.
+      if (payload.slug !== undefined) {
+        return ctx.response.status(403).send({ error: 'permission_required' })
+      }
+      if (
+        payload.closedMessage !== undefined &&
+        role !== 'admin' &&
+        !servicePermissions?.[ctx.params.id]?.canToggleService
+      ) {
+        return ctx.response.status(403).send({ error: 'permission_required' })
+      }
     }
 
-    const service = await Service.query()
-      .where('id', Number(ctx.params.id))
-      .where('orgId', Number(orgId))
-      .first()
+    const serviceQuery = Service.query().where('id', Number(ctx.params.id))
+    if (!isStaff) serviceQuery.where('orgId', Number(orgId))
+    const service = await serviceQuery.first()
 
     if (!service) {
       return ctx.response.status(404).send({ error: 'service_not_found' })
     }
 
-    const payload = await ctx.request.validateUsing(updateServiceValidator)
-    service.status = payload.status
+    if (payload.slug !== undefined) {
+      if (payload.slug !== null) {
+        const existing = await Service.findBy('slug', payload.slug)
+        if (existing && existing.id !== service.id) {
+          return ctx.response.status(409).send({ error: 'slug_already_used' })
+        }
+      }
+      service.slug = payload.slug
+    }
+    if (payload.status) {
+      service.status = payload.status
+    }
+    if (payload.openingDays !== undefined) {
+      service.openingDays = payload.openingDays
+    }
+    if (payload.openingStartTime !== undefined) {
+      service.openingStartTime = payload.openingStartTime
+    }
+    if (payload.openingEndTime !== undefined) {
+      service.openingEndTime = payload.openingEndTime
+    }
+    if (payload.closedMessage !== undefined) {
+      service.closedMessage = payload.closedMessage
+    }
     await service.save()
+    await service.load('closures')
 
     return ctx.response.send({
-      data: { id: service.id, name: service.name, status: service.status },
+      data: {
+        id: service.id,
+        name: service.name,
+        status: service.status,
+        slug: service.slug,
+        openingDays: service.openingDays,
+        openingStartTime: service.openingStartTime,
+        openingEndTime: service.openingEndTime,
+        closedMessage: service.closedMessage,
+        closures: service.closures.map(serializeClosure),
+        ...computeServiceAvailability(service, service.closures),
+      },
     })
   }
 
@@ -302,8 +464,9 @@ export default class ServicesController {
   /**
    * GET /services/:id/status — pair-à-pair, appelé par svc-billetterie
    * juste avant d'accepter une commande (agent ou en ligne) : un service
-   * fermé/archivé ne doit jamais laisser passer une vente, même si le
-   * front a déjà masqué le bouton correspondant côté agent.
+   * fermé/archivé, ou simplement en dehors de ses horaires/périodes de
+   * fermeture, ne doit jamais laisser passer une vente, même si le front
+   * a déjà masqué le bouton correspondant côté agent.
    */
   async status(ctx: HttpContext) {
     if (ctx.internalAuth.scope !== 'billetterie') {
@@ -315,13 +478,104 @@ export default class ServicesController {
     const service = await Service.query()
       .where('id', Number(ctx.params.id))
       .where('orgId', orgId)
+      .preload('closures')
+      .preload('organization')
       .first()
 
     if (!service) {
       return ctx.response.status(404).send({ error: 'service_not_found' })
     }
 
-    return ctx.response.send({ data: { status: service.status } })
+    // Un organisme suspendu bloque la vente sur tous ses services même si
+    // chacun reste individuellement status='active' (voir lookupBySlug).
+    // Endpoint réservé au scope 'billetterie' (garde plus haut) :
+    // ignoreWeeklySchedule toujours vrai — les jours hebdo sont vérifiés
+    // séparément côté svc-billetterie via `openingDays` + `isWeekdayOpen`,
+    // contre la date de visite choisie, pas contre "maintenant".
+    const availability =
+      service.organization?.status !== 'active'
+        ? { isOpen: false, reopensAt: null, closedReason: null }
+        : computeServiceAvailability(service, service.closures, DateTime.now(), {
+            ignoreWeeklySchedule: true,
+          })
+
+    return ctx.response.send({
+      data: {
+        status: service.status,
+        name: service.name,
+        orgName: service.organization?.name ?? null,
+        hasLogo: service.logoMimeType !== null,
+        openingDays: service.openingDays,
+        closures: service.closures.map(serializeClosure),
+        ...availability,
+      },
+    })
+  }
+
+  /**
+   * POST /services/:id/closures — ajoute une période de fermeture
+   * ponctuelle (vacances, fermeture exceptionnelle…) à un de SES
+   * services. Même permission que le toggle de statut/horaires : c'est
+   * la même famille de bascule d'exploitation.
+   */
+  async createClosure(ctx: HttpContext) {
+    const { orgId, role, servicePermissions } = ctx.internalAuth
+    if (role !== 'admin' && !servicePermissions?.[ctx.params.id]?.canToggleService) {
+      return ctx.response.status(403).send({ error: 'permission_required' })
+    }
+
+    const service = await Service.query()
+      .where('id', Number(ctx.params.id))
+      .where('orgId', Number(orgId))
+      .first()
+    if (!service) {
+      return ctx.response.status(404).send({ error: 'service_not_found' })
+    }
+
+    const payload = await ctx.request.validateUsing(createServiceClosureValidator)
+    if (payload.endDate < payload.startDate) {
+      return ctx.response.status(422).send({ error: 'end_before_start' })
+    }
+
+    const closure = await ServiceClosure.create({
+      serviceId: service.id,
+      label: payload.label,
+      startDate: payload.startDate,
+      endDate: payload.endDate,
+    })
+
+    return ctx.response.status(201).send({ data: serializeClosure(closure) })
+  }
+
+  /**
+   * DELETE /services/:id/closures/:closureId — retire une période de
+   * fermeture (fin anticipée, erreur de saisie…).
+   */
+  async deleteClosure(ctx: HttpContext) {
+    const { orgId, role, servicePermissions } = ctx.internalAuth
+    if (role !== 'admin' && !servicePermissions?.[ctx.params.id]?.canToggleService) {
+      return ctx.response.status(403).send({ error: 'permission_required' })
+    }
+
+    const service = await Service.query()
+      .where('id', Number(ctx.params.id))
+      .where('orgId', Number(orgId))
+      .first()
+    if (!service) {
+      return ctx.response.status(404).send({ error: 'service_not_found' })
+    }
+
+    const closure = await ServiceClosure.query()
+      .where('id', Number(ctx.params.closureId))
+      .where('serviceId', service.id)
+      .first()
+    if (!closure) {
+      return ctx.response.status(404).send({ error: 'closure_not_found' })
+    }
+
+    await closure.delete()
+
+    return ctx.response.send({ data: { id: closure.id } })
   }
 
   /**
@@ -370,13 +624,20 @@ export default class ServicesController {
     const service = await Service.query()
       .where('id', Number(ctx.params.id))
       .where('orgId', orgId)
+      .preload('organization')
       .first()
 
     if (!service) {
       return ctx.response.status(404).send({ error: 'service_not_found' })
     }
 
-    return ctx.response.send({ data: { name: service.name } })
+    return ctx.response.send({
+      data: {
+        name: service.name,
+        orgName: service.organization?.name ?? null,
+        hasLogo: service.logoMimeType !== null,
+      },
+    })
   }
 
   /**

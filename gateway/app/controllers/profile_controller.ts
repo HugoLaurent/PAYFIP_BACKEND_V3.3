@@ -88,6 +88,38 @@ export default class ProfileController {
     })
   }
 
+  /** POST /auth/services/:id/closures — ajoute une période de fermeture ponctuelle à un service de son organisme. */
+  async createServiceClosure(ctx: HttpContext) {
+    const { orgId, userId, role, services } = ctx.clientAuth
+    await proxyRequest(ctx, {
+      targetUrl: `${env.get('SVC_AUTH_BASE_URL')}/services/${ctx.params.id}/closures`,
+      jwt: {
+        orgId: String(orgId),
+        scope: 'auth',
+        sub: String(userId),
+        role,
+        servicePermissions: buildServicePermissions(services),
+        aud: 'svc-auth',
+      },
+    })
+  }
+
+  /** DELETE /auth/services/:id/closures/:closureId — retire une période de fermeture d'un service de son organisme. */
+  async deleteServiceClosure(ctx: HttpContext) {
+    const { orgId, userId, role, services } = ctx.clientAuth
+    await proxyRequest(ctx, {
+      targetUrl: `${env.get('SVC_AUTH_BASE_URL')}/services/${ctx.params.id}/closures/${ctx.params.closureId}`,
+      jwt: {
+        orgId: String(orgId),
+        scope: 'auth',
+        sub: String(userId),
+        role,
+        servicePermissions: buildServicePermissions(services),
+        aud: 'svc-auth',
+      },
+    })
+  }
+
   /** POST /auth/services/:id/logo — un admin change le logo d'un de ses services. */
   async uploadServiceLogo(ctx: HttpContext) {
     const { orgId, userId, role } = ctx.clientAuth
