@@ -17,7 +17,6 @@ test-console.html
 node_modules
 build
 dist
-package-lock.json
 **/tmp/*
 !**/tmp/.gitkeep
 .adonisjs
