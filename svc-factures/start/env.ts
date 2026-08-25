@@ -31,4 +31,10 @@ export default await Env.create(new URL('../', import.meta.url), {
   AREGIE_API_KEYS: Env.schema.string(),
 
   OTP_MODE: Env.schema.enum(['fake', 'real'] as const),
+
+  // Filet de sécurité pour OTP_MODE=fake : une valeur banale ("true", "1")
+  // survivrait sans qu'on la remarque à un copier-coller de config vers la
+  // vraie prod. Celle-ci est volontairement explicite pour être repérée
+  // immédiatement dans une revue des variables d'environnement.
+  ALLOW_INSECURE_OTP_MODE: Env.schema.string.optional(),
 })

@@ -36,7 +36,10 @@ export async function requestOtp(email: string): Promise<OtpRequestResult> {
     verifiedAt: null,
   })
 
-  if (env.get('OTP_MODE') === 'fake') {
+  if (
+    env.get('OTP_MODE') === 'fake' &&
+    env.get('ALLOW_INSECURE_OTP_MODE') === 'this-is-not-production'
+  ) {
     logger.info({ email, code }, 'otp_service: code (fake, non envoyé par email)')
     return { status: 'sent', devCode: code }
   }
