@@ -5,7 +5,22 @@ on:
     branches: [main]
 
 jobs:
+  audit:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        service: [gateway, svc-auth, svc-billetterie, svc-factures, svc-gestion, svc-mail]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: npm audit (${{ matrix.service }})
+        working-directory: ${{ matrix.service }}
+        run: npm audit --audit-level=high
+
   deploy:
+    needs: audit
     runs-on: ubuntu-latest
     steps:
       - name: Deploy to VPS

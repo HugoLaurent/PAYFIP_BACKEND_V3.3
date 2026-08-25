@@ -7,7 +7,7 @@ FROM node:24-alpine AS base
 FROM base AS deps
 WORKDIR /app
 COPY package.json package-lock.json ./
-RUN npm ci
+RUN npm ci --ignore-scripts && npm rebuild @swc/core
 
 # ---------------------------------------------------------------------------
 # build : compile le TypeScript et produit ./build (bundle autonome)
@@ -25,7 +25,7 @@ FROM base AS production
 ENV NODE_ENV=production
 WORKDIR /app
 COPY --from=build /app/build /app
-RUN npm ci --omit=dev
+RUN npm ci --ignore-scripts --omit=dev
 
 EXPOSE 3337
 CMD ["node", "./bin/server.js"]
