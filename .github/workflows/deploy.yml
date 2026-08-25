@@ -33,6 +33,5 @@ jobs:
             set -e
             cd /opt/payfip/backend-src
             git pull origin main
-            cd /opt/payfip/deploy
-            docker compose -f docker-compose.yml -f docker-compose.prod.yml build gateway svc-auth svc-billetterie svc-factures svc-gestion svc-mail
-            docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d gateway svc-auth svc-billetterie svc-factures svc-gestion svc-mail
+            sudo /opt/payfip/deploy/bin/compose-deploy.sh build gateway svc-auth svc-billetterie svc-factures svc-gestion svc-mail
+            sudo /opt/payfip/deploy/bin/compose-deploy.sh up -d gateway svc-auth svc-billetterie svc-factures svc-gestion svc-mail
