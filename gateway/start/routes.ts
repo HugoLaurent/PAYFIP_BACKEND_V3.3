@@ -15,7 +15,7 @@ router.get('/health', () => {
   return { status: 'ok', service: 'gateway' }
 })
 
-router.post('/auth/login', [AuthController, 'login'])
+router.post('/auth/login', [AuthController, 'login']).use(middleware.loginRateLimit())
 router.post('/auth/refresh', [AuthController, 'refresh']).use(middleware.clientAuth())
 router.get('/auth/me', [ProfileController, 'show']).use(middleware.clientAuth())
 router.patch('/auth/me', [ProfileController, 'updateProfile']).use(middleware.clientAuth())
