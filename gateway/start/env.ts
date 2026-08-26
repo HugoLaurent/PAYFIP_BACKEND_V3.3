@@ -31,6 +31,10 @@ export default await Env.create(new URL('../', import.meta.url), {
 
   GATEWAY_ALLOWED_ORIGINS: Env.schema.string(),
 
+  // Suivi d'erreurs (GlitchTip, self-hosted, compatible Sentry) — absent en
+  // dev/test, le SDK reste inerte plutôt que de faire échouer le démarrage.
+  GLITCHTIP_DSN: Env.schema.string.optional(),
+
   SVC_AUTH_BASE_URL: Env.schema.string({ format: 'url', tld: false }),
   SVC_GESTION_BASE_URL: Env.schema.string({ format: 'url', tld: false }),
   SVC_BILLETTERIE_BASE_URL: Env.schema.string({ format: 'url', tld: false }),

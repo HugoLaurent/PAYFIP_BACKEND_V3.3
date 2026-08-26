@@ -37,4 +37,8 @@ export default await Env.create(new URL('../', import.meta.url), {
   // vraie prod. Celle-ci est volontairement explicite pour être repérée
   // immédiatement dans une revue des variables d'environnement.
   ALLOW_INSECURE_OTP_MODE: Env.schema.string.optional(),
+
+  // Suivi d'erreurs (GlitchTip, self-hosted, compatible Sentry) — absent en
+  // dev/test, le SDK reste inerte plutôt que de faire échouer le démarrage.
+  GLITCHTIP_DSN: Env.schema.string.optional(),
 })

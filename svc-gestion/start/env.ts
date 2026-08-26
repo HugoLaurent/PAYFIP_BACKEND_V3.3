@@ -30,4 +30,8 @@ export default await Env.create(new URL('../', import.meta.url), {
   FAKE_PAYFIP_BASE_URL: Env.schema.string.optional({ format: 'url', tld: false }),
   PAYFIP_SOAP_URL: Env.schema.string.optional({ format: 'url', tld: false }),
   PAYFIP_SOAP_TIMEOUT_MS: Env.schema.number.optional(),
+
+  // Suivi d'erreurs (GlitchTip, self-hosted, compatible Sentry) — absent en
+  // dev/test, le SDK reste inerte plutôt que de faire échouer le démarrage.
+  GLITCHTIP_DSN: Env.schema.string.optional(),
 })
