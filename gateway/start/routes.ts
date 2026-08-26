@@ -9,11 +9,15 @@ const BilletterieAgentsController = () => import('#controllers/billetterie_agent
 const PaiementPublicsController = () => import('#controllers/paiement_publics_controller')
 const FacturesPublicsController = () => import('#controllers/factures_publics_controller')
 const StaffController = () => import('#controllers/staff_controller')
+const StaffAuthController = () => import('#controllers/staff_auth_controller')
 const ServicesPublicsController = () => import('#controllers/services_publics_controller')
 
 router.get('/health', () => {
   return { status: 'ok', service: 'gateway' }
 })
+
+router.get('/staff/auth/login', [StaffAuthController, 'login'])
+router.get('/staff/auth/callback', [StaffAuthController, 'callback'])
 
 router.post('/auth/login', [AuthController, 'login']).use(middleware.loginRateLimit())
 router.post('/auth/refresh', [AuthController, 'refresh']).use(middleware.clientAuth())

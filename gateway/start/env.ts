@@ -14,7 +14,20 @@ export default await Env.create(new URL('../', import.meta.url), {
 
   CLIENT_JWT_SECRET: Env.schema.string(),
 
-  STAFF_API_KEY: Env.schema.string(),
+  // SSO staff — Authentik (OIDC, Authorization Code). Remplace l'ancienne
+  // clé statique partagée : chaque membre du staff se connecte avec son
+  // propre compte Authentik, dans le groupe payfip-staff.
+  AUTHENTIK_ISSUER: Env.schema.string({ format: 'url', tld: false }),
+  AUTHENTIK_CLIENT_ID: Env.schema.string(),
+  AUTHENTIK_CLIENT_SECRET: Env.schema.secret(),
+  AUTHENTIK_REDIRECT_URI: Env.schema.string({ format: 'url', tld: false }),
+  // Où renvoyer le navigateur une fois le token de session staff émis.
+  STAFF_FRONTEND_REDIRECT_URL: Env.schema.string({ format: 'url', tld: false }),
+  // Secret de signature du JWT de session staff émis par la Gateway après
+  // vérification du id_token Authentik — indépendant de CLIENT_JWT_SECRET
+  // (citoyens/agents) pour que la compromission de l'un n'affecte pas
+  // l'autre périmètre.
+  STAFF_JWT_SECRET: Env.schema.string(),
 
   GATEWAY_ALLOWED_ORIGINS: Env.schema.string(),
 
