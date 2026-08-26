@@ -6,6 +6,7 @@ server.errorHandler(() => import('#exceptions/handler'))
 
 server.use([
   () => import('#middleware/force_json_response_middleware'),
+  () => import('#middleware/security_headers_middleware'),
   () => import('#middleware/container_bindings_middleware'),
   () => import('@adonisjs/cors/cors_middleware'),
 ])
@@ -16,4 +17,5 @@ export const middleware = router.named({
   clientAuth: () => import('#middleware/client_auth_middleware'),
   staffAuth: () => import('#middleware/staff_auth_middleware'),
   loginRateLimit: () => import('#middleware/login_rate_limit_middleware'),
+  publicProofRateLimit: () => import('#middleware/public_proof_rate_limit_middleware'),
 })

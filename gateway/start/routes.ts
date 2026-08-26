@@ -86,21 +86,29 @@ router.get('/billetterie/orders/:id/tickets/:ticketId/pdf', [
   BilletteriePublicsController,
   'ticketPdf',
 ])
-router.post('/billetterie/orders/by-reference/:reference/retry-payment', [
-  BilletteriePublicsController,
-  'retryOrderPayment',
-])
+router
+  .post('/billetterie/orders/by-reference/:reference/retry-payment', [
+    BilletteriePublicsController,
+    'retryOrderPayment',
+  ])
+  .use(middleware.publicProofRateLimit())
 
 router.get('/factures/services/lookup/:slug', [FacturesPublicsController, 'serviceLookup'])
 router.post('/factures/otp/request', [FacturesPublicsController, 'otpRequest'])
 router.post('/factures/otp/verify', [FacturesPublicsController, 'otpVerify'])
-router.post('/factures/verify', [FacturesPublicsController, 'verify'])
-router.post('/factures/:id/pay', [FacturesPublicsController, 'pay'])
+router
+  .post('/factures/verify', [FacturesPublicsController, 'verify'])
+  .use(middleware.publicProofRateLimit())
+router
+  .post('/factures/:id/pay', [FacturesPublicsController, 'pay'])
+  .use(middleware.publicProofRateLimit())
 router.get('/factures/by-reference/:reference', [FacturesPublicsController, 'byReference'])
-router.post('/factures/by-reference/:reference/retry-payment', [
-  FacturesPublicsController,
-  'retryInvoicePayment',
-])
+router
+  .post('/factures/by-reference/:reference/retry-payment', [
+    FacturesPublicsController,
+    'retryInvoicePayment',
+  ])
+  .use(middleware.publicProofRateLimit())
 
 // AREGIE — authentifié par sa propre clé Bearer (aregieAuth côté service
 // cible), pas par le JWT client ni interne. Jamais de session, un appel
