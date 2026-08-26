@@ -10,6 +10,12 @@ export default class SecurityHeadersMiddleware {
     ctx.response.header('X-Content-Type-Options', 'nosniff')
     ctx.response.header('X-Frame-Options', 'DENY')
     ctx.response.header('Referrer-Policy', 'strict-origin-when-cross-origin')
+    // Défense en profondeur : la vraie coupure du HTTP en clair doit se
+    // faire à la couche qui termine le TLS (le reverse proxy, en amont de
+    // ce conteneur) — un en-tête ici ne protège que les clients qui
+    // reçoivent déjà une réponse HTTPS, pas ceux qui restent bloqués sur
+    // du HTTP simple faute de redirection en amont.
+    ctx.response.header('Strict-Transport-Security', 'max-age=31536000; includeSubDomains')
     return next()
   }
 }

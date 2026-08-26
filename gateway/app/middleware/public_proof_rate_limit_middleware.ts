@@ -1,6 +1,6 @@
 import type { HttpContext } from '@adonisjs/core/http'
 import type { NextFn } from '@adonisjs/core/types/http'
-import { isRateLimited, recordAttempt } from '#services/rate_limiter'
+import { isRateLimited, recordAttempt, retryAfterSeconds } from '#services/rate_limiter'
 
 // Endpoints publics où l'appelant prouve la connaissance d'une donnée
 // (référence + montant d'une facture, etc.) plutôt qu'une identité — même
@@ -13,6 +13,7 @@ export default class PublicProofRateLimitMiddleware {
     const key = `public-proof:${ctx.request.ip()}`
 
     if (isRateLimited(key)) {
+      ctx.response.header('Retry-After', String(retryAfterSeconds(key)))
       return ctx.response.status(429).send({ error: 'too_many_attempts' })
     }
 

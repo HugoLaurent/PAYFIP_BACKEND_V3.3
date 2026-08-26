@@ -1,6 +1,6 @@
 import type { HttpContext } from '@adonisjs/core/http'
 import type { NextFn } from '@adonisjs/core/types/http'
-import { isRateLimited, recordAttempt } from '#services/rate_limiter'
+import { isRateLimited, recordAttempt, retryAfterSeconds } from '#services/rate_limiter'
 import { verifyStaffToken, type StaffAuthPayload } from '#services/staff_jwt_service'
 
 declare module '@adonisjs/core/http' {
@@ -18,6 +18,7 @@ export default class StaffAuthMiddleware {
     // requête casserait un usage normal — seul un enchaînement d'échecs
     // (token invalide/deviné) doit être bloqué.
     if (isRateLimited(`staff:${ip}`)) {
+      ctx.response.header('Retry-After', String(retryAfterSeconds(`staff:${ip}`)))
       return ctx.response.status(429).send({ error: 'too_many_attempts' })
     }
 

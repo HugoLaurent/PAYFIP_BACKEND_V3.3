@@ -18,6 +18,18 @@ export function isRateLimited(key: string): boolean {
   return timestamps.length >= MAX_FAILURES
 }
 
+// Secondes avant qu'une nouvelle tentative redevienne possible — le temps
+// restant avant que la plus ancienne tentative de la fenêtre n'en sorte.
+// Les tentatives sont poussées dans l'ordre chronologique, donc la première
+// de la liste filtrée est la plus ancienne encore comptée.
+export function retryAfterSeconds(key: string): number {
+  const windowStart = Date.now() - WINDOW_MS
+  const timestamps = (failures.get(key) ?? []).filter((t) => t > windowStart)
+  const oldest = timestamps[0]
+  if (oldest === undefined) return 0
+  return Math.max(1, Math.ceil((oldest + WINDOW_MS - Date.now()) / 1000))
+}
+
 export function recordAttempt(key: string): void {
   const windowStart = Date.now() - WINDOW_MS
   const timestamps = (failures.get(key) ?? []).filter((t) => t > windowStart)
