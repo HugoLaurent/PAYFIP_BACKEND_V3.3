@@ -86,14 +86,7 @@ export interface StaffIdentity {
   sub: string
   email: string
   name: string | null
-  groups: string[]
 }
-
-// Groupe Authentik requis pour accéder au panel — en plus du binding déjà
-// posé côté Authentik sur l'application elle-même (défense en profondeur :
-// un id_token valide pour une tout autre application Authentik ne doit
-// jamais suffire ici).
-const REQUIRED_GROUP = 'payfip-staff'
 
 export async function completeOidcLogin(
   code: string,
@@ -133,17 +126,15 @@ export async function completeOidcLogin(
   if (claims.nonce !== expectedNonce) return null
   if (typeof claims.sub !== 'string' || typeof claims.email !== 'string') return null
 
-  const groups = Array.isArray(claims.groups) ? claims.groups.filter(isString) : []
-  if (!groups.includes(REQUIRED_GROUP)) return null
-
+  // Le contrôle d'appartenance au groupe payfip-staff est fait côté
+  // Authentik (binding sur l'application, "Failure Result: Don't Pass") —
+  // pas ici. Ce provider n'expose pas de scope "groups" (voir
+  // scopes_supported dans le .well-known), donc un id_token valide ne
+  // porte jamais ce claim ; exiger sa présence bloquerait toute connexion,
+  // légitime ou non.
   return {
     sub: claims.sub,
     email: claims.email,
     name: typeof claims.name === 'string' ? claims.name : null,
-    groups,
   }
-}
-
-function isString(value: unknown): value is string {
-  return typeof value === 'string'
 }
