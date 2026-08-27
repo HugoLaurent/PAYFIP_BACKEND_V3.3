@@ -5,6 +5,11 @@ import type Invoice from '#models/invoice'
 import { sendMail } from '#services/svc_mail_client'
 import { fetchServiceIdentity } from '#services/svc_auth_client'
 import FailedInvoiceMail from '#models/failed_invoice_mail'
+import { notifyOpsAlert } from '#services/ops_alert_service'
+
+// Au-delà de ce délai depuis la première tentative, on arrête de rejouer
+// et on alerte plutôt que d'échouer indéfiniment en silence.
+const MAX_RETRY_AGE_HOURS = 24
 
 export async function sendInvoiceConfirmationEmail(invoice: Invoice): Promise<void> {
   if (!invoice.payerEmail) {
@@ -45,9 +50,20 @@ export async function sendInvoiceConfirmationEmail(invoice: Invoice): Promise<vo
     // node ace invoice-mails:retry puisse reprendre plus tard.
     const existing = await FailedInvoiceMail.findBy('invoiceId', invoice.id)
     const attempts = (existing?.attempts ?? 0) + 1
-    await FailedInvoiceMail.updateOrCreate(
-      { invoiceId: invoice.id },
-      { attempts, nextRetryAt: DateTime.now().plus({ minutes: 2 ** attempts }) }
-    )
+    const firstFailedAt = existing?.createdAt ?? DateTime.now()
+    const ageHours = DateTime.now().diff(firstFailedAt, 'hours').hours
+
+    if (ageHours >= MAX_RETRY_AGE_HOURS) {
+      await FailedInvoiceMail.query().where('invoiceId', invoice.id).delete()
+      await notifyOpsAlert(
+        'Email de confirmation facture abandonné après 24h',
+        `Facture #${invoice.id} (${invoice.payerEmail}) : ${attempts} tentatives échouées sur ${MAX_RETRY_AGE_HOURS}h, abandon.`
+      )
+    } else {
+      await FailedInvoiceMail.updateOrCreate(
+        { invoiceId: invoice.id },
+        { attempts, nextRetryAt: DateTime.now().plus({ minutes: 2 ** attempts }) }
+      )
+    }
   }
 }

@@ -4,6 +4,13 @@ import mail from '@adonisjs/mail/services/main'
 import env from '#start/env'
 import EmailDelivery from '#models/email_delivery'
 import { renderMailTemplate, type MailTemplateName } from '#services/mail_template_registry'
+import { notifyOpsAlert } from '#services/ops_alert_service'
+
+// Au-delà de ce délai depuis la première tentative, on arrête de rejouer
+// (le backoff exponentiel a de toute façon rendu les essais suivants
+// extrêmement rares) et on alerte plutôt que d'échouer indéfiniment en
+// silence.
+const MAX_RETRY_AGE_HOURS = 24
 
 export async function attemptDelivery(delivery: EmailDelivery): Promise<void> {
   delivery.attempts += 1
@@ -50,7 +57,19 @@ export async function attemptDelivery(delivery: EmailDelivery): Promise<void> {
     logger.warn({ deliveryId: delivery.id, template: delivery.template, error }, "emails: échec d'envoi")
     delivery.status = 'failed'
     delivery.error = error instanceof Error ? error.message : String(error)
-    delivery.nextRetryAt = DateTime.now().plus({ minutes: 2 ** delivery.attempts })
+
+    const ageHours = DateTime.now().diff(delivery.createdAt, 'hours').hours
+    if (ageHours >= MAX_RETRY_AGE_HOURS) {
+      // nextRetryAt=null exclut la ligne de retryFailedDeliveries() (qui
+      // filtre nextRetryAt <= now) sans avoir besoin d'un statut dédié.
+      delivery.nextRetryAt = null
+      await notifyOpsAlert(
+        'Email abandonné après 24h',
+        `Template "${delivery.template}" vers ${delivery.toEmail} (delivery #${delivery.id}) : ${delivery.attempts} tentatives échouées sur ${MAX_RETRY_AGE_HOURS}h, abandon. Dernière erreur : ${delivery.error}`
+      )
+    } else {
+      delivery.nextRetryAt = DateTime.now().plus({ minutes: 2 ** delivery.attempts })
+    }
   }
 
   await delivery.save()

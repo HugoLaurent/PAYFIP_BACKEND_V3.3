@@ -32,4 +32,9 @@ export default await Env.create(new URL('../', import.meta.url), {
   // Suivi d'erreurs (GlitchTip, self-hosted, compatible Sentry) — absent en
   // dev/test, le SDK reste inerte plutôt que de faire échouer le démarrage.
   GLITCHTIP_DSN: Env.schema.string.optional(),
+
+  // Alerte Teams envoyée quand un envoi abandonne après 24h d'échecs
+  // (voir email_dispatcher_service.ts) — absent en dev, l'alerte reste
+  // inerte.
+  OPS_ALERT_WEBHOOK_URL: Env.schema.string.optional(),
 })

@@ -4,6 +4,11 @@ import type PaymentRequest from '#models/payment_request'
 import WebhookDelivery, { type WebhookEventType } from '#models/webhook_delivery'
 import { mintGestionJwt } from '#services/internal_jwt_service'
 import { fetchWithTimeout } from '#services/fetch_with_timeout'
+import { notifyOpsAlert } from '#services/ops_alert_service'
+
+// Au-delà de ce délai depuis la première tentative, on arrête de rejouer
+// et on alerte plutôt que d'échouer indéfiniment en silence.
+const MAX_RETRY_AGE_HOURS = 24
 
 export async function dispatchWebhook(
   paymentRequest: PaymentRequest,
@@ -86,8 +91,20 @@ export async function attemptDelivery(
       'webhook_dispatcher: échec de livraison'
     )
     delivery.status = 'failed'
-    // Backoff simple ; un job planifié pourra relire les "failed" plus tard.
-    delivery.nextRetryAt = DateTime.now().plus({ minutes: 2 ** delivery.attempts })
+
+    const ageHours = DateTime.now().diff(delivery.createdAt, 'hours').hours
+    if (ageHours >= MAX_RETRY_AGE_HOURS) {
+      // nextRetryAt=null exclut la ligne de retryFailedDeliveries() (qui
+      // filtre nextRetryAt <= now) sans avoir besoin d'un statut dédié.
+      delivery.nextRetryAt = null
+      await notifyOpsAlert(
+        'Webhook abandonné après 24h',
+        `Événement "${delivery.eventType}" vers ${delivery.targetUrl} (delivery #${delivery.id}) : ${delivery.attempts} tentatives échouées sur ${MAX_RETRY_AGE_HOURS}h, abandon.`
+      )
+    } else {
+      // Backoff simple ; un job planifié pourra relire les "failed" plus tard.
+      delivery.nextRetryAt = DateTime.now().plus({ minutes: 2 ** delivery.attempts })
+    }
   }
 
   await delivery.save()

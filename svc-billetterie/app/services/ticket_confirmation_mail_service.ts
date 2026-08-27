@@ -7,6 +7,11 @@ import { sendMail } from '#services/svc_mail_client'
 import { fetchServiceStatus } from '#services/svc_auth_client'
 import { generateOrderTicketsPdf } from '#services/ticket_pdf_service'
 import FailedTicketMail from '#models/failed_ticket_mail'
+import { notifyOpsAlert } from '#services/ops_alert_service'
+
+// Au-delà de ce délai depuis la première tentative, on arrête de rejouer
+// et on alerte plutôt que d'échouer indéfiniment en silence.
+const MAX_RETRY_AGE_HOURS = 24
 
 export async function sendTicketConfirmationEmail(order: Order, tickets: Ticket[]): Promise<void> {
   const countByType = new Map<string, number>()
@@ -59,9 +64,20 @@ export async function sendTicketConfirmationEmail(order: Order, tickets: Ticket[
     // node ace ticket-mails:retry puisse reprendre plus tard.
     const existing = await FailedTicketMail.findBy('orderId', order.id)
     const attempts = (existing?.attempts ?? 0) + 1
-    await FailedTicketMail.updateOrCreate(
-      { orderId: order.id },
-      { attempts, nextRetryAt: DateTime.now().plus({ minutes: 2 ** attempts }) }
-    )
+    const firstFailedAt = existing?.createdAt ?? DateTime.now()
+    const ageHours = DateTime.now().diff(firstFailedAt, 'hours').hours
+
+    if (ageHours >= MAX_RETRY_AGE_HOURS) {
+      await FailedTicketMail.query().where('orderId', order.id).delete()
+      await notifyOpsAlert(
+        'Email de confirmation billet abandonné après 24h',
+        `Commande #${order.id} (${order.email}) : ${attempts} tentatives échouées sur ${MAX_RETRY_AGE_HOURS}h, abandon.`
+      )
+    } else {
+      await FailedTicketMail.updateOrCreate(
+        { orderId: order.id },
+        { attempts, nextRetryAt: DateTime.now().plus({ minutes: 2 ** attempts }) }
+      )
+    }
   }
 }
