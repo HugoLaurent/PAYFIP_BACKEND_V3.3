@@ -19,6 +19,7 @@ export default await Env.create(new URL('../', import.meta.url), {
   GATEWAY_JWT_PUBLIC_KEY: Env.schema.string(),
   BILLETTERIE_JWT_PUBLIC_KEY: Env.schema.string(),
   FACTURES_JWT_PUBLIC_KEY: Env.schema.string(),
+  INSCRIPTION_JWT_PUBLIC_KEY: Env.schema.string(),
 
   GESTION_JWT_PRIVATE_KEY: Env.schema.string(),
   SVC_AUTH_BASE_URL: Env.schema.string({ format: 'url', tld: false }),

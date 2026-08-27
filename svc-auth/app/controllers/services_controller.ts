@@ -215,7 +215,10 @@ export default class ServicesController {
     }
 
     let slug =
-      payload.slug ?? (payload.serviceType === 'billetterie' ? slugify(payload.name) : null)
+      payload.slug ??
+      (payload.serviceType === 'billetterie' || payload.serviceType === 'inscription'
+        ? slugify(payload.name)
+        : null)
     if (slug) {
       const existingSlug = await Service.findBy('slug', slug)
       if (existingSlug) {
@@ -300,7 +303,8 @@ export default class ServicesController {
         ? {
             closedMessage: null,
             ...computeServiceAvailability(service, service.closures, DateTime.now(), {
-              ignoreWeeklySchedule: service.serviceType === 'billetterie',
+              ignoreWeeklySchedule:
+                service.serviceType === 'billetterie' || service.serviceType === 'inscription',
             }),
           }
         : {
@@ -469,7 +473,7 @@ export default class ServicesController {
    * a déjà masqué le bouton correspondant côté agent.
    */
   async status(ctx: HttpContext) {
-    if (ctx.internalAuth.scope !== 'billetterie') {
+    if (!['billetterie', 'inscription'].includes(ctx.internalAuth.scope)) {
       return ctx.response.status(403).send({ error: 'scope_not_allowed' })
     }
 
@@ -503,6 +507,7 @@ export default class ServicesController {
       data: {
         status: service.status,
         name: service.name,
+        slug: service.slug,
         orgName: service.organization?.name ?? null,
         hasLogo: service.logoMimeType !== null,
         openingDays: service.openingDays,

@@ -20,6 +20,7 @@ export default await Env.create(new URL('../', import.meta.url), {
   GESTION_JWT_PUBLIC_KEY: Env.schema.string(),
   FACTURES_JWT_PUBLIC_KEY: Env.schema.string(),
   BILLETTERIE_JWT_PUBLIC_KEY: Env.schema.string(),
+  INSCRIPTION_JWT_PUBLIC_KEY: Env.schema.string(),
 
   // Suivi d'erreurs (GlitchTip, self-hosted, compatible Sentry) — absent en
   // dev/test, le SDK reste inerte plutôt que de faire échouer le démarrage.

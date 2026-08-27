@@ -3,7 +3,7 @@ import vine from '@vinejs/vine'
 export const createServiceValidator = vine.compile(
   vine.object({
     name: vine.string().trim().minLength(1),
-    serviceType: vine.enum(['billetterie', 'factures'] as const),
+    serviceType: vine.enum(['billetterie', 'factures', 'inscription'] as const),
     numcli: vine
       .string()
       .trim()

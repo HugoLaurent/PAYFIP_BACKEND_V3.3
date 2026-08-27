@@ -19,6 +19,7 @@ export default await Env.create(new URL('../', import.meta.url), {
   BILLETTERIE_JWT_PUBLIC_KEY: Env.schema.string(),
   FACTURES_JWT_PUBLIC_KEY: Env.schema.string(),
   GATEWAY_JWT_PUBLIC_KEY: Env.schema.string(),
+  INSCRIPTION_JWT_PUBLIC_KEY: Env.schema.string(),
 
   MAIL_MODE: Env.schema.enum(['fake', 'real'] as const),
   SMTP_HOST: Env.schema.string.optional(),

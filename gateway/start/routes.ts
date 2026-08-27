@@ -6,6 +6,8 @@ const AuthController = () => import('#controllers/auth_controller')
 const ProfileController = () => import('#controllers/profile_controller')
 const BilletteriePublicsController = () => import('#controllers/billetterie_publics_controller')
 const BilletterieAgentsController = () => import('#controllers/billetterie_agents_controller')
+const InscriptionPublicsController = () => import('#controllers/inscription_publics_controller')
+const InscriptionAgentsController = () => import('#controllers/inscription_agents_controller')
 const PaiementPublicsController = () => import('#controllers/paiement_publics_controller')
 const FacturesPublicsController = () => import('#controllers/factures_publics_controller')
 const StaffController = () => import('#controllers/staff_controller')
@@ -93,6 +95,63 @@ router
   ])
   .use(middleware.publicProofRateLimit())
 
+router.get('/inscription/services/lookup/:slug', [
+  InscriptionPublicsController,
+  'serviceLookup',
+])
+router.post('/inscription/otp/request', [InscriptionPublicsController, 'otpRequest'])
+router.post('/inscription/otp/verify', [InscriptionPublicsController, 'otpVerify'])
+router.get('/inscription/events', [InscriptionPublicsController, 'listEvents'])
+router.get('/inscription/events/by-slug/:slug', [InscriptionPublicsController, 'showEventBySlug'])
+router.get('/inscription/events/:id', [InscriptionPublicsController, 'showEvent'])
+router.post('/inscription/registrations', [InscriptionPublicsController, 'createRegistration'])
+router.post('/inscription/registrations/with-documents', [
+  InscriptionPublicsController,
+  'createRegistrationWithDocuments',
+])
+router
+  .get('/inscription/registrations/by-reference/:reference', [
+    InscriptionPublicsController,
+    'registrationByReference',
+  ])
+  .use(middleware.publicProofRateLimit())
+router
+  .get('/inscription/registrations/by-token/:accessToken', [
+    InscriptionPublicsController,
+    'registrationByToken',
+  ])
+  .use(middleware.publicProofRateLimit())
+router
+  .post('/inscription/registrations/by-token/:accessToken/documents', [
+    InscriptionPublicsController,
+    'replaceRegistrationDocuments',
+  ])
+  .use(middleware.publicProofRateLimit())
+router
+  .post('/inscription/registrations/by-token/:accessToken/cancel', [
+    InscriptionPublicsController,
+    'cancelRegistration',
+  ])
+  .use(middleware.publicProofRateLimit())
+router
+  .post('/inscription/registrations/by-token/:accessToken/pay', [
+    InscriptionPublicsController,
+    'payRegistration',
+  ])
+  .use(middleware.publicProofRateLimit())
+router
+  .post('/inscription/registrations/by-token/:accessToken/retry-payment', [
+    InscriptionPublicsController,
+    'retryRegistrationPayment',
+  ])
+  .use(middleware.publicProofRateLimit())
+router
+  .get('/inscription/registrations/by-token/:accessToken/attestation', [
+    InscriptionPublicsController,
+    'downloadAttestation',
+  ])
+  .use(middleware.publicProofRateLimit())
+
 router.get('/factures/services/lookup/:slug', [FacturesPublicsController, 'serviceLookup'])
 router.post('/factures/otp/request', [FacturesPublicsController, 'otpRequest'])
 router.post('/factures/otp/verify', [FacturesPublicsController, 'otpVerify'])
@@ -147,6 +206,27 @@ router
     router.patch('/billetterie/tariffs/:id', [BilletterieAgentsController, 'updateTariff'])
     router.delete('/billetterie/tariffs/:id', [BilletterieAgentsController, 'deleteTariff'])
     router.get('/billetterie/budget-codes', [BilletterieAgentsController, 'listBudgetCodes'])
+  })
+  .use(middleware.clientAuth())
+
+router
+  .group(() => {
+    router.get('/inscription/services/:id/events', [InscriptionAgentsController, 'listEvents'])
+    router.post('/inscription/services/:id/events', [InscriptionAgentsController, 'createEvent'])
+    router.patch('/inscription/events/:id', [InscriptionAgentsController, 'updateEvent'])
+    router.delete('/inscription/events/:id', [InscriptionAgentsController, 'deleteEvent'])
+    router.get('/inscription/events/:id/registrations', [
+      InscriptionAgentsController,
+      'listRegistrations',
+    ])
+    router.post('/inscription/registrations/:id/review', [
+      InscriptionAgentsController,
+      'reviewRegistration',
+    ])
+    router.get('/inscription/registrations/:id/documents/:documentId', [
+      InscriptionAgentsController,
+      'downloadDocument',
+    ])
   })
   .use(middleware.clientAuth())
 

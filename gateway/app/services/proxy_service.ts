@@ -131,3 +131,79 @@ export async function proxyUpload(ctx: HttpContext, options: ProxyUploadOptions)
 
   ctx.response.status(response.status).send(body)
 }
+
+export interface ProxyMultipartUploadOptions {
+  targetUrl: string
+  jwt: InternalJwtClaims
+  fileFieldName: string
+  multiple?: boolean
+  maxSize: string
+  extnames: string[]
+  fields: string[]
+}
+
+/**
+ * Comme proxyUpload, mais pour des dépôts qui portent plusieurs fichiers
+ * ET des champs texte à côté (ex. justificatifs d'inscription : email,
+ * nom, prénom, eventId + 1 à N fichiers) — proxyUpload reste dédié au cas
+ * logo/cover à un seul fichier, sans autre champ, pour ne pas complexifier
+ * ce chemin qui reste le plus fréquent.
+ */
+export async function proxyMultipartUpload(
+  ctx: HttpContext,
+  options: ProxyMultipartUploadOptions
+): Promise<void> {
+  const fileOptions = { size: options.maxSize, extnames: options.extnames }
+  const files = options.multiple
+    ? ctx.request.files(options.fileFieldName, fileOptions)
+    : (() => {
+        const single = ctx.request.file(options.fileFieldName, fileOptions)
+        return single ? [single] : []
+      })()
+
+  if (files.length === 0) {
+    ctx.response.status(400).send({ error: `${options.fileFieldName}_required` })
+    return
+  }
+  const invalid = files.find((file) => !file.isValid)
+  if (invalid) {
+    ctx.response
+      .status(400)
+      .send({ error: `invalid_${options.fileFieldName}`, detail: invalid.errors })
+    return
+  }
+
+  const uploadFormData = new FormData()
+  for (const file of files) {
+    const buffer = await readFile(file.tmpPath!)
+    uploadFormData.append(
+      options.fileFieldName,
+      new Blob([buffer], { type: `${file.type}/${file.subtype}` }),
+      file.clientName
+    )
+  }
+  for (const field of options.fields) {
+    const value = ctx.request.input(field)
+    if (value !== undefined && value !== null) {
+      uploadFormData.append(field, String(value))
+    }
+  }
+
+  // Pas de Content-Type manuel : FormData génère lui-même le boundary
+  // multipart, le fixer à la main casserait l'encodage.
+  const uploadResponse = await fetchWithTimeout(options.targetUrl, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${await mintInternalJwt(options.jwt)}` },
+    body: uploadFormData,
+    redirect: 'manual',
+  })
+
+  let uploadBody: unknown = null
+  try {
+    uploadBody = await uploadResponse.json()
+  } catch {
+    uploadBody = null
+  }
+
+  ctx.response.status(uploadResponse.status).send(uploadBody)
+}

@@ -33,6 +33,7 @@ services:
       SVC_BILLETTERIE_BASE_URL: http://svc-billetterie:3335
       SVC_FACTURES_BASE_URL: http://svc-factures:3337
       SVC_MAIL_BASE_URL: http://svc-mail:3339
+      SVC_INSCRIPTION_BASE_URL: http://svc-inscription:3341
     networks:
       - payfip-internal
 
@@ -147,6 +148,31 @@ services:
       PORT: "3339"
       DB_HOST: postgres
       DB_PORT: "5432"
+    networks:
+      - payfip-internal
+
+  svc-inscription:
+    build:
+      context: ../svc-inscription
+    container_name: svc-inscription
+    restart: unless-stopped
+    env_file: ./env/svc-inscription.env
+    environment:
+      # Le conteneur n'a pas de sortie IPv6 fonctionnelle, mais la
+      # résolution DNS système renvoie parfois une adresse AAAA en
+      # priorité pour des hôtes externes réels (SMTP M365, PayFiP) —
+      # Node tente alors cette adresse et échoue (ENETUNREACH). On force
+      # IPv4 en priorité pour toute résolution DNS sortante.
+      NODE_OPTIONS: --dns-result-order=ipv4first
+      NODE_ENV: production
+      HOST: 0.0.0.0
+      PORT: "3341"
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      SVC_GESTION_BASE_URL: http://svc-gestion:3333
+      SVC_MAIL_BASE_URL: http://svc-mail:3339
+      SVC_AUTH_BASE_URL: http://svc-auth:3334
+      SELF_BASE_URL: http://svc-inscription:3341
     networks:
       - payfip-internal
 

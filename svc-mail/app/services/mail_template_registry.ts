@@ -2,8 +2,20 @@ import vine from '@vinejs/vine'
 import { renderOtpCodeEmail } from '#services/otp_code_mail_template'
 import { renderTicketConfirmationEmail } from '#services/ticket_confirmation_mail_template'
 import { renderInvoiceConfirmationEmail } from '#services/invoice_confirmation_mail_template'
+import { renderInscriptionConfirmationEmail } from '#services/inscription_confirmation_mail_template'
+import { renderInscriptionPaymentRequestEmail } from '#services/inscription_payment_request_mail_template'
+import { renderInscriptionRegistrationRejectedEmail } from '#services/inscription_registration_rejected_mail_template'
+import { renderInscriptionWaitlistOfferEmail } from '#services/inscription_waitlist_offer_mail_template'
 
-export const MAIL_TEMPLATE_NAMES = ['otp_code', 'ticket_confirmation', 'invoice_confirmation'] as const
+export const MAIL_TEMPLATE_NAMES = [
+  'otp_code',
+  'ticket_confirmation',
+  'invoice_confirmation',
+  'inscription_confirmation',
+  'inscription_payment_request',
+  'inscription_registration_rejected',
+  'inscription_waitlist_offer',
+] as const
 export type MailTemplateName = (typeof MAIL_TEMPLATE_NAMES)[number]
 
 const otpCodeValidator = vine.compile(
@@ -41,6 +53,60 @@ const invoiceConfirmationValidator = vine.compile(
   })
 )
 
+const inscriptionConfirmationValidator = vine.compile(
+  vine.object({
+    email: vine.string().trim().email(),
+    eventTitle: vine.string().trim().minLength(1),
+    eventDate: vine.string().trim().optional(),
+    eventLocation: vine.string().trim().optional(),
+    quantity: vine.number().positive(),
+    amountCents: vine.number().min(0),
+    registrationNumber: vine.string().trim().minLength(1),
+    serviceName: vine.string().trim().optional(),
+    orgName: vine.string().trim().optional(),
+    logoUrl: vine.string().trim().url().optional(),
+  })
+)
+
+const inscriptionPaymentRequestValidator = vine.compile(
+  vine.object({
+    email: vine.string().trim().email(),
+    eventTitle: vine.string().trim().minLength(1),
+    amountCents: vine.number().positive(),
+    // Lien front portant l'accessToken de l'inscription, pas une URL
+    // PayFiP — on ne valide donc que la forme d'URL générique.
+    payUrl: vine.string().trim().url(),
+    serviceName: vine.string().trim().optional(),
+    orgName: vine.string().trim().optional(),
+    logoUrl: vine.string().trim().url().optional(),
+  })
+)
+
+const inscriptionRegistrationRejectedValidator = vine.compile(
+  vine.object({
+    email: vine.string().trim().email(),
+    eventTitle: vine.string().trim().minLength(1),
+    rejectionReason: vine.string().trim().minLength(1),
+    documentDeadlineAt: vine.string().trim().minLength(1),
+    redepositUrl: vine.string().trim().url(),
+    serviceName: vine.string().trim().optional(),
+    orgName: vine.string().trim().optional(),
+    logoUrl: vine.string().trim().url().optional(),
+  })
+)
+
+const inscriptionWaitlistOfferValidator = vine.compile(
+  vine.object({
+    email: vine.string().trim().email(),
+    eventTitle: vine.string().trim().minLength(1),
+    waitlistResponseDeadline: vine.string().trim().minLength(1),
+    confirmUrl: vine.string().trim().url(),
+    serviceName: vine.string().trim().optional(),
+    orgName: vine.string().trim().optional(),
+    logoUrl: vine.string().trim().url().optional(),
+  })
+)
+
 export interface RenderedEmail {
   subject: string
   html: string
@@ -62,6 +128,31 @@ export async function renderMailTemplate(
     case 'invoice_confirmation': {
       const parsed = await invoiceConfirmationValidator.validate(data)
       return { subject: 'Paiement confirmé', html: renderInvoiceConfirmationEmail(parsed) }
+    }
+    case 'inscription_confirmation': {
+      const parsed = await inscriptionConfirmationValidator.validate(data)
+      return { subject: 'Inscription confirmée', html: renderInscriptionConfirmationEmail(parsed) }
+    }
+    case 'inscription_payment_request': {
+      const parsed = await inscriptionPaymentRequestValidator.validate(data)
+      return {
+        subject: 'Votre inscription est validée, procédez au paiement',
+        html: renderInscriptionPaymentRequestEmail(parsed),
+      }
+    }
+    case 'inscription_registration_rejected': {
+      const parsed = await inscriptionRegistrationRejectedValidator.validate(data)
+      return {
+        subject: 'Votre justificatif doit être complété',
+        html: renderInscriptionRegistrationRejectedEmail(parsed),
+      }
+    }
+    case 'inscription_waitlist_offer': {
+      const parsed = await inscriptionWaitlistOfferValidator.validate(data)
+      return {
+        subject: "Une place s'est libérée",
+        html: renderInscriptionWaitlistOfferEmail(parsed),
+      }
     }
   }
 }

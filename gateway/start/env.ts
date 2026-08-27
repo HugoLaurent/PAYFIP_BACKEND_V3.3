@@ -40,4 +40,5 @@ export default await Env.create(new URL('../', import.meta.url), {
   SVC_BILLETTERIE_BASE_URL: Env.schema.string({ format: 'url', tld: false }),
   SVC_FACTURES_BASE_URL: Env.schema.string({ format: 'url', tld: false }),
   SVC_MAIL_BASE_URL: Env.schema.string({ format: 'url', tld: false }),
+  SVC_INSCRIPTION_BASE_URL: Env.schema.string({ format: 'url', tld: false }),
 })

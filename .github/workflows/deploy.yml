@@ -9,7 +9,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        service: [gateway, svc-auth, svc-billetterie, svc-factures, svc-gestion, svc-mail]
+        service: [gateway, svc-auth, svc-billetterie, svc-factures, svc-gestion, svc-mail, svc-inscription]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -33,5 +33,5 @@ jobs:
             set -e
             cd /opt/payfip/backend-src
             git pull origin main
-            sudo /opt/payfip/deploy/bin/compose-deploy.sh build gateway svc-auth svc-billetterie svc-factures svc-gestion svc-mail
-            sudo /opt/payfip/deploy/bin/compose-deploy.sh up -d gateway svc-auth svc-billetterie svc-factures svc-gestion svc-mail
+            sudo /opt/payfip/deploy/bin/compose-deploy.sh build gateway svc-auth svc-billetterie svc-factures svc-gestion svc-mail svc-inscription
+            sudo /opt/payfip/deploy/bin/compose-deploy.sh up -d gateway svc-auth svc-billetterie svc-factures svc-gestion svc-mail svc-inscription

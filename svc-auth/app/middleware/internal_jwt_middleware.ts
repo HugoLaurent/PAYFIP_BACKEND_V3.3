@@ -36,6 +36,7 @@ const trustedKeysPromise = Promise.all([
   importJWK(decodeJwk(env.get('GESTION_JWT_PUBLIC_KEY')), 'EdDSA') as Promise<KeyObject>,
   importJWK(decodeJwk(env.get('FACTURES_JWT_PUBLIC_KEY')), 'EdDSA') as Promise<KeyObject>,
   importJWK(decodeJwk(env.get('BILLETTERIE_JWT_PUBLIC_KEY')), 'EdDSA') as Promise<KeyObject>,
+  importJWK(decodeJwk(env.get('INSCRIPTION_JWT_PUBLIC_KEY')), 'EdDSA') as Promise<KeyObject>,
 ])
 
 export default class InternalJwtMiddleware {

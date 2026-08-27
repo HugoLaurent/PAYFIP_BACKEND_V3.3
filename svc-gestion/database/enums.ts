@@ -1,5 +1,5 @@
 
-export const SOURCE_SERVICES = ['billetterie', 'factures'] as const
+export const SOURCE_SERVICES = ['billetterie', 'factures', 'inscription'] as const
 
 export const PAYMENT_REQUEST_STATUSES = [
   'draft',
