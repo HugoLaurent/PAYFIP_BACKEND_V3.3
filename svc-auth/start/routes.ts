@@ -1,5 +1,10 @@
 import router from '@adonisjs/core/services/router'
 import { middleware } from '#start/kernel'
+import { HealthChecks } from '@adonisjs/core/health'
+import { DbCheck } from '@adonisjs/lucid/database'
+import db from '@adonisjs/lucid/services/db'
+
+const healthChecks = new HealthChecks().register([new DbCheck(db.connection())])
 
 const AuthController = () => import('#controllers/auth_controller')
 const ProfileController = () => import('#controllers/profile_controller')
@@ -7,8 +12,13 @@ const ServicesController = () => import('#controllers/services_controller')
 const OrganizationsController = () => import('#controllers/organizations_controller')
 const UsersController = () => import('#controllers/users_controller')
 
-router.get('/health', () => {
-  return { status: 'ok', service: 'svc-auth' }
+router.get('/health', async (ctx) => {
+  const report = await healthChecks.run()
+  return ctx.response.status(report.isHealthy ? 200 : 503).send({
+    status: report.isHealthy ? 'ok' : 'error',
+    service: 'svc-auth',
+    checks: report.checks.map((c) => ({ name: c.name, status: c.status })),
+  })
 })
 
 router.post('/auth/login', [AuthController, 'login'])
