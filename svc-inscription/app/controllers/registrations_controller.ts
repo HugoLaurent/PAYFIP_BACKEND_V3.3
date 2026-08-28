@@ -112,6 +112,9 @@ function serializeRegistrationForCitizen(registration: Registration, event: Even
     reviewedByLabel: registration.reviewedByLabel,
     reviewedAt: registration.reviewedAt?.toISO() ?? null,
     documentDeadlineAt: registration.documentDeadlineAt?.toISO() ?? null,
+    // Distingue "vos documents sont refusés" de "il ne manque qu'un
+    // complément" côté citoyen — voir RegistrationRejected.tsx.
+    keepExistingDocuments: registration.keepExistingDocuments,
     waitlistPosition: registration.waitlistPosition,
     waitlistNotifiedAt: registration.waitlistNotifiedAt?.toISO() ?? null,
     waitlistResponseDeadline: registration.waitlistResponseDeadline?.toISO() ?? null,
@@ -150,6 +153,7 @@ function serializeRegistrationForAgent(registration: Registration) {
     registrationReference: registration.paymentReference ?? String(registration.id),
     rejectionReason: registration.rejectionReason,
     documentDeadlineAt: registration.documentDeadlineAt?.toISO() ?? null,
+    keepExistingDocuments: registration.keepExistingDocuments,
     waitlistPosition: registration.waitlistPosition,
     reviewedByLabel: registration.reviewedByLabel,
     reviewedAt: registration.reviewedAt?.toISO() ?? null,
@@ -620,9 +624,14 @@ export default class RegistrationsController {
     )
 
     await db.transaction(async (trx) => {
-      await RegistrationDocument.query({ client: trx })
-        .where('registrationId', registration.id)
-        .update({ isCurrent: false })
+      // Un vrai rejet invalide les anciens documents (tout redéposer) ;
+      // une demande de complément (keepExistingDocuments) les laisse
+      // `isCurrent` — les nouveaux s'ajoutent, l'agent voit les deux.
+      if (!registration.keepExistingDocuments) {
+        await RegistrationDocument.query({ client: trx })
+          .where('registrationId', registration.id)
+          .update({ isCurrent: false })
+      }
 
       await this.storeDocuments(registration.id, processedFiles, trx)
 
@@ -630,6 +639,7 @@ export default class RegistrationsController {
         status: 'awaiting_review',
         rejectionReason: null,
         documentDeadlineAt: null,
+        keepExistingDocuments: false,
       }).save()
     })
 
@@ -948,10 +958,14 @@ export default class RegistrationsController {
     registration.reviewedByLabel = agentLabel(ctx.internalAuth)
     registration.reviewedAt = DateTime.now()
 
-    if (payload.decision === 'reject') {
+    if (payload.decision === 'reject' || payload.decision === 'request_more_documents') {
       registration.status = 'rejected'
       registration.rejectionReason = payload.rejectionReason ?? null
       registration.documentDeadlineAt = DateTime.now().plus({ days: DOCUMENT_RESUBMIT_DEADLINE_DAYS })
+      // 'request_more_documents' : les documents déjà déposés restent
+      // valables (voir replaceDocuments, qui ne les invalide plus dans ce
+      // cas) — seul un vrai 'reject' force à tout redéposer.
+      registration.keepExistingDocuments = payload.decision === 'request_more_documents'
       await registration.save()
 
       await sendRegistrationRejectionEmail(registration, event)

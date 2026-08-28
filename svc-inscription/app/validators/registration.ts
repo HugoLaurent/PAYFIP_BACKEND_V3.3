@@ -30,13 +30,17 @@ export const listRegistrationsValidator = vine.compile(
 
 export const reviewRegistrationValidator = vine.compile(
   vine.object({
-    decision: vine.enum(['approve', 'reject'] as const),
+    // 'request_more_documents' : les documents déjà déposés restent
+    // valables, on demande juste un complément (voir
+    // registrations_controller.ts#review) — distinct d'un vrai 'reject'
+    // uniquement par ce qui arrive aux documents existants au redépôt.
+    decision: vine.enum(['approve', 'reject', 'request_more_documents'] as const),
     rejectionReason: vine
       .string()
       .trim()
       .minLength(1)
       .optional()
-      .requiredWhen('decision', '=', 'reject'),
+      .requiredWhen('decision', 'in', ['reject', 'request_more_documents']),
   })
 )
 

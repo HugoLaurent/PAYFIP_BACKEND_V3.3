@@ -68,6 +68,12 @@ export default class Registration extends BaseModel {
   @column.dateTime()
   declare documentDeadlineAt: DateTime | null
 
+  // true seulement après une demande de "document supplémentaire" (pas un
+  // vrai rejet) — indique à replaceDocuments() de ne pas invalider les
+  // documents déjà déposés, voir registrations_controller.ts#review.
+  @column()
+  declare keepExistingDocuments: boolean
+
   @column()
   declare waitlistPosition: number | null
 
