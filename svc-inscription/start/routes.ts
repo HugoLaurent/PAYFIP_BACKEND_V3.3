@@ -20,6 +20,7 @@ router
     router.get('/events/:id', [EventsController, 'show'])
     router.post('/services/:id/events', [EventsController, 'store'])
     router.patch('/events/:id', [EventsController, 'update'])
+    router.post('/events/:id/cancel', [EventsController, 'cancel'])
     router.delete('/events/:id', [EventsController, 'destroy'])
 
     router.post('/registrations', [RegistrationsController, 'store'])

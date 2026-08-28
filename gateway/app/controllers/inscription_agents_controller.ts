@@ -53,6 +53,22 @@ export default class InscriptionAgentsController {
     })
   }
 
+  async cancelEvent(ctx: HttpContext) {
+    const { orgId, userId, role, services } = ctx.clientAuth
+    await proxyRequest(ctx, {
+      targetUrl: `${base()}/events/${ctx.params.id}/cancel`,
+      jwt: {
+        orgId: String(orgId),
+        scope: 'inscription',
+        sub: String(userId),
+        role,
+        servicePermissions: buildServicePermissions(services),
+        serviceIds: services.map((s) => s.id),
+        aud: 'svc-inscription',
+      },
+    })
+  }
+
   async deleteEvent(ctx: HttpContext) {
     const { orgId, userId, role, services } = ctx.clientAuth
     await proxyRequest(ctx, {

@@ -165,6 +165,39 @@ export async function sendRegistrationRejectionEmail(
   )
 }
 
+/**
+ * Envoyée depuis EventsController#cancel à chaque inscription encore
+ * active au moment de l'annulation. `wasPaid` distingue le cas d'un
+ * paiement PayFiP déjà encaissé (registration.status était `confirmed`
+ * avant l'annulation, avec un montant non nul) — aucun remboursement
+ * automatique n'est déclenché ici, l'email invite simplement le citoyen à
+ * contacter l'organisme.
+ */
+export async function sendEventCancelledEmail(
+  registration: Registration,
+  event: Event,
+  wasPaid: boolean
+): Promise<void> {
+  const identity = await loadServiceIdentity(registration.orgId, registration.serviceId)
+
+  await sendWithRetryLedger(registration, 'event_cancelled', () =>
+    sendMail({
+      template: 'inscription_event_cancelled',
+      to: registration.email,
+      data: {
+        email: registration.email,
+        eventTitle: event.title,
+        eventDate: event.eventDate?.toFormat('dd/MM/yyyy'),
+        wasPaid,
+        amountCents: registration.priceCentsAtRegistration,
+        serviceName: identity.name,
+        orgName: identity.orgName,
+        logoUrl: identity.logoUrl,
+      },
+    })
+  )
+}
+
 export async function sendWaitlistOfferEmail(registration: Registration, event: Event): Promise<void> {
   const identity = await loadServiceIdentity(registration.orgId, registration.serviceId)
 

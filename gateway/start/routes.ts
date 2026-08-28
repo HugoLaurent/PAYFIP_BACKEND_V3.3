@@ -214,6 +214,7 @@ router
     router.get('/inscription/services/:id/events', [InscriptionAgentsController, 'listEvents'])
     router.post('/inscription/services/:id/events', [InscriptionAgentsController, 'createEvent'])
     router.patch('/inscription/events/:id', [InscriptionAgentsController, 'updateEvent'])
+    router.post('/inscription/events/:id/cancel', [InscriptionAgentsController, 'cancelEvent'])
     router.delete('/inscription/events/:id', [InscriptionAgentsController, 'deleteEvent'])
     router.get('/inscription/events/:id/registrations', [
       InscriptionAgentsController,

@@ -5,6 +5,7 @@ import Event from '#models/event'
 import Registration from '#models/registration'
 import { createEventValidator, updateEventValidator, listEventsAgentValidator } from '#validators/event'
 import { computeSeatsHeld } from '#services/capacity_service'
+import { sendEventCancelledEmail } from '#services/registration_mail_service'
 
 const publicListValidator = vine.compile(
   vine.object({
@@ -268,6 +269,13 @@ export default class EventsController {
 
     const payload = await ctx.request.validateUsing(updateEventValidator)
 
+    // 'cancelled' ne se pose jamais via ce PATCH générique — seulement via
+    // POST /events/:id/cancel, qui bascule aussi les inscriptions actives
+    // et envoie l'email d'annulation (voir #cancel plus bas).
+    if (payload.status === 'cancelled') {
+      return ctx.response.status(422).send({ error: 'use_cancel_endpoint' })
+    }
+
     if (payload.slug !== undefined && payload.slug !== event.slug) {
       const collision = await Event.query()
         .where('orgId', orgId)
@@ -304,14 +312,73 @@ export default class EventsController {
   }
 
   /**
-   * DELETE /events/:id — suppression définitive, réservée à un évènement
-   * déjà `archived` — jamais un évènement encore visible/actif qui
-   * pourrait avoir des inscriptions en cours. Les inscriptions existantes
+   * POST /events/:id/cancel — l'agent annule un évènement encore actif
+   * (draft/published/closed) : bascule l'évènement et toutes ses
+   * inscriptions non terminales en `cancelled`, et envoie à chacune un
+   * email d'annulation (invitant à contacter l'organisme en cas de
+   * paiement déjà encaissé — aucun remboursement n'est déclenché
+   * automatiquement, voir registration_mail_service.ts). Ne supprime
+   * aucune ligne : l'historique des inscriptions/paiements reste
+   * consultable, contrairement à `destroy`.
+   */
+  async cancel(ctx: HttpContext) {
+    const { orgId, role, servicePermissions, serviceIds } = ctx.internalAuth
+
+    const event = await Event.query().where('id', Number(ctx.params.id)).where('orgId', orgId).first()
+    if (!event) {
+      return ctx.response.status(404).send({ error: 'event_not_found' })
+    }
+
+    if (!serviceIds?.includes(event.serviceId)) {
+      return ctx.response.status(403).send({ error: 'service_not_allowed_for_agent' })
+    }
+    if (role !== 'admin' && !servicePermissions?.[String(event.serviceId)]?.canManageTariffs) {
+      return ctx.response.status(403).send({ error: 'permission_required' })
+    }
+
+    if (event.status === 'cancelled' || event.status === 'archived') {
+      return ctx.response.status(409).send({ error: 'event_already_terminal' })
+    }
+
+    event.status = 'cancelled'
+    await event.save()
+
+    const registrations = await Registration.query()
+      .where('eventId', event.id)
+      .whereNotIn('status', ['cancelled', 'expired'])
+
+    let notifiedCount = 0
+    for (const registration of registrations) {
+      const wasPaid = registration.status === 'confirmed' && registration.priceCentsAtRegistration > 0
+
+      registration.status = 'cancelled'
+      registration.cancelledAt = DateTime.now()
+      // payfipIdOp survivrait sinon d'une session PayFiP passée (réussie ou
+      // non) et ferait passer canRetryPayment à true côté citoyen — il n'y
+      // a plus rien à (re)payer, l'évènement n'existe plus (voir
+      // registrations_controller.ts#retryPayment).
+      registration.payfipIdOp = null
+      await registration.save()
+
+      await sendEventCancelledEmail(registration, event, wasPaid)
+      notifiedCount += 1
+    }
+
+    return ctx.response.send({ data: serializeEventForAgent(event), notifiedCount })
+  }
+
+  /**
+   * DELETE /events/:id — suppression définitive. Autorisée pour un
+   * évènement `archived`, `cancelled` (voir #cancel), ou dont la date est
+   * déjà passée — jamais un évènement encore à venir et non traité qui
+   * pourrait avoir des inscrits en attente. Les inscriptions existantes
    * gardent leur propre copie du prix (priceCentsAtRegistration) mais
    * référencent toujours eventId : voir la contrainte FK sans CASCADE sur
    * `registrations.event_id`, qui refusera la suppression tant qu'il
-   * existe des inscriptions pour cet évènement — cohérent avec
-   * "jamais une cascade silencieuse" (voir migration).
+   * existe la moindre inscription (même terminale) pour cet évènement —
+   * cohérent avec "jamais une cascade silencieuse" (voir migration) : un
+   * évènement passé avec des inscrits reste consultable en base tant que
+   * l'agent ne veut pas en purger l'historique manuellement.
    */
   async destroy(ctx: HttpContext) {
     const { orgId, role, servicePermissions, serviceIds } = ctx.internalAuth
@@ -328,7 +395,9 @@ export default class EventsController {
       return ctx.response.status(403).send({ error: 'permission_required' })
     }
 
-    if (event.status !== 'archived') {
+    const eventIsPast = event.eventDate !== null && event.eventDate < DateTime.now().startOf('day')
+    const isDeletableStatus = event.status === 'archived' || event.status === 'cancelled'
+    if (!isDeletableStatus && !eventIsPast) {
       return ctx.response.status(409).send({ error: 'event_must_be_archived_first' })
     }
 

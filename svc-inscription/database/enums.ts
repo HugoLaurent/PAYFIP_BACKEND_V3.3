@@ -1,7 +1,12 @@
 
 export const EVENT_TYPES = ['formation', 'evenement'] as const
 
-export const EVENT_STATUSES = ['draft', 'published', 'closed', 'archived'] as const
+// 'cancelled' n'est jamais posé par PATCH /events/:id (voir
+// events_controller.ts#update) — uniquement via POST /events/:id/cancel,
+// qui bascule aussi les inscriptions actives et envoie l'email
+// d'annulation. Distinct de 'archived' : un évènement archivé n'a jamais eu
+// personne à prévenir (0 inscription, sinon la suppression le refuse).
+export const EVENT_STATUSES = ['draft', 'published', 'closed', 'archived', 'cancelled'] as const
 
 // L'ordre n'a pas de signification (pas de machine à états linéaire) —
 // voir registrations_controller.ts / capacity_service.ts / waitlist_service.ts
@@ -23,6 +28,7 @@ export const FAILED_REGISTRATION_MAIL_KINDS = [
   'payment_request',
   'rejection',
   'waitlist_offer',
+  'event_cancelled',
 ] as const
 
 export const FORM_FIELD_TYPES = [
