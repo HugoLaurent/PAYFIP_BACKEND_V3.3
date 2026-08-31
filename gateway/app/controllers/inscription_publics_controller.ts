@@ -76,7 +76,7 @@ export default class InscriptionPublicsController {
       jwt: { orgId, scope: 'inscription', aud: 'svc-inscription' },
       maxSize: '8mb',
       extnames: ['pdf', 'png', 'jpg', 'jpeg'],
-      fields: ['eventId', 'email', 'firstName', 'lastName', 'quantity', 'formResponses'],
+      fields: ['eventId', 'email', 'firstName', 'lastName', 'quantity', 'formResponses', 'frontRedirectUrl'],
     })
   }
 
