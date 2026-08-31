@@ -24,10 +24,15 @@ export default await Env.create(new URL('../', import.meta.url), {
   SVC_MAIL_BASE_URL: Env.schema.string({ format: 'url', tld: false }),
   SVC_AUTH_BASE_URL: Env.schema.string({ format: 'url', tld: false }),
   SELF_BASE_URL: Env.schema.string({ format: 'url', tld: false }),
-  // Domaine public (pas l'URL interne docker) — pour construire des liens
-  // et images atteignables depuis un client mail, comme le logo du
-  // service embarqué dans l'email de confirmation.
+  // Domaine public du gateway (pas l'URL interne docker) — pour construire
+  // des liens vers des routes API atteignables depuis un client mail, comme
+  // le logo du service embarqué dans l'email de confirmation.
   PAYFIP_PUBLIC_BASE_URL: Env.schema.string({ format: 'url', tld: false }),
+  // Domaine public du front React (payfip-front) — distinct du gateway :
+  // les liens "payer maintenant"/"redéposer un document" de
+  // registration_mail_service.ts pointent vers des routes de la SPA
+  // (/inscription/:slug/retour), jamais vers le gateway.
+  FRONT_PUBLIC_BASE_URL: Env.schema.string({ format: 'url', tld: false }),
 
   OTP_MODE: Env.schema.enum(['fake', 'real'] as const),
 

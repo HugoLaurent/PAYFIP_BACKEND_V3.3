@@ -48,7 +48,7 @@ async function loadServiceIdentity(orgId: number, serviceId: number): Promise<Se
  */
 function buildFrontUrl(slug: string | undefined, serviceId: number, accessToken: string): string {
   const segment = slug ?? String(serviceId)
-  return `${env.get('PAYFIP_PUBLIC_BASE_URL')}/inscription/${segment}/retour?accessToken=${accessToken}`
+  return `${env.get('FRONT_PUBLIC_BASE_URL')}/inscription/${segment}/retour?accessToken=${accessToken}`
 }
 
 /**
