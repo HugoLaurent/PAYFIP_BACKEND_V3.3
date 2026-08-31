@@ -6,7 +6,7 @@ import logger from '@adonisjs/core/services/logger'
 import db from '@adonisjs/lucid/services/db'
 import type { TransactionClientContract } from '@adonisjs/lucid/types/database'
 import Event from '#models/event'
-import type { FormField } from '#models/event'
+import type { FormField, DocumentRequirement } from '#models/event'
 import Registration from '#models/registration'
 import RegistrationDocument from '#models/registration_document'
 import {
@@ -34,11 +34,12 @@ import {
   sendRegistrationRejectionEmail,
 } from '#services/registration_mail_service'
 
-// Documents : 1 à 5 fichiers, PDF/PNG/JPEG, 8 Mo/fichier (plan §3 parcours C).
+// Documents : PDF/PNG/JPEG, 8 Mo/fichier — un fichier par exigence nommée
+// (voir Event.DocumentRequirement, plafonné à 5 par événement côté
+// validators/event.ts).
 const DOCUMENT_MAX_SIZE = '8mb'
 const DOCUMENT_EXTNAMES = ['pdf', 'png', 'jpg', 'jpeg']
 const DOCUMENT_ALLOWED_MIME_TYPES = ['application/pdf', 'image/png', 'image/jpeg']
-const MAX_DOCUMENTS = 5
 
 // Re-dépôt après rejet : le citoyen dispose de 7 jours avant que la place
 // soit libérée (valeur exacte laissée à trancher avec l'agent/produit,
@@ -46,6 +47,10 @@ const MAX_DOCUMENTS = 5
 // rassembler un nouveau justificatif, ni trop long pour bloquer la file
 // d'attente).
 const DOCUMENT_RESUBMIT_DEADLINE_DAYS = 7
+
+function eventRequiresDocuments(event: Event): boolean {
+  return (event.documentRequirements?.length ?? 0) > 0
+}
 
 function validateFormResponses(
   formSchema: FormField[] | null,
@@ -115,6 +120,9 @@ function serializeRegistrationForCitizen(registration: Registration, event: Even
     // Distingue "vos documents sont refusés" de "il ne manque qu'un
     // complément" côté citoyen — voir RegistrationRejected.tsx.
     keepExistingDocuments: registration.keepExistingDocuments,
+    // Pour afficher les mêmes slots de dépôt nommés qu'à l'inscription
+    // initiale sur l'écran de redépôt (voir RegistrationRejected.tsx).
+    documentRequirements: event.documentRequirements,
     waitlistPosition: registration.waitlistPosition,
     waitlistNotifiedAt: registration.waitlistNotifiedAt?.toISO() ?? null,
     waitlistResponseDeadline: registration.waitlistResponseDeadline?.toISO() ?? null,
@@ -161,6 +169,7 @@ function serializeRegistrationForAgent(registration: Registration) {
     createdAt: registration.createdAt.toISO(),
     documents: registration.documents?.map((d) => ({
       id: d.id,
+      documentKey: d.documentKey,
       filename: d.filename,
       mimeType: d.mimeType,
       sizeBytes: d.sizeBytes,
@@ -252,7 +261,7 @@ export default class RegistrationsController {
       .first()
     if (!event) return ctx.response.status(404).send({ error: 'event_not_found' })
 
-    if (event.requiresDocuments) {
+    if (eventRequiresDocuments(event)) {
       return ctx.response.status(422).send({ error: 'documents_required' })
     }
 
@@ -343,46 +352,66 @@ export default class RegistrationsController {
       return ctx.response.status(422).send({ error: 'invalid_form_responses', detail: formError })
     }
 
-    const files = ctx.request.files('documents', {
-      size: DOCUMENT_MAX_SIZE,
-      extnames: DOCUMENT_EXTNAMES,
-    })
-
-    if (files.length === 0) {
-      return ctx.response.status(422).send({ error: 'documents_required' })
-    }
-    if (files.length > MAX_DOCUMENTS) {
-      return ctx.response.status(422).send({ error: 'too_many_documents' })
-    }
-    for (const file of files) {
-      if (!file.isValid) {
-        return ctx.response.status(422).send({ error: 'invalid_document', detail: file.errors })
-      }
-      const mimeType = `${file.type}/${file.subtype}`
-      if (!DOCUMENT_ALLOWED_MIME_TYPES.includes(mimeType)) {
-        return ctx.response.status(422).send({ error: 'invalid_document', detail: 'unsupported_type' })
-      }
+    const requirements = event.documentRequirements ?? []
+    if (requirements.length === 0) {
+      return ctx.response.status(422).send({ error: 'documents_not_required' })
     }
 
-    const processedFiles = await Promise.all(
-      files.map(async (file) => {
-        const mimeType = `${file.type}/${file.subtype}`
-        const original = await readFile(file.tmpPath!)
-        const processed = await processDocument(original, mimeType)
-        return {
-          filename: file.clientName,
-          mimeType: processed.mimeType,
-          data: processed.data,
-        }
-      })
-    )
+    const result = await this.readNamedDocuments(ctx, requirements, { requireAll: true })
+    if (!result.ok) return ctx.response.status(result.status).send(result.body)
 
     return this.createRegistrationAndRespond(
       ctx,
       event,
       { firstName, lastName, email, quantity, formResponses, frontRedirectUrl },
-      processedFiles
+      result.documents
     )
+  }
+
+  /**
+   * Lit, valide et traite un fichier par exigence nommée (voir
+   * Event.DocumentRequirement) — un slot de dépôt distinct par pièce,
+   * jamais un champ générique unique. `requireAll` impose la présence de
+   * chaque exigence `required` (inscription initiale, ou redépôt après un
+   * vrai rejet où tous les anciens documents sont invalidés) ; à `false`
+   * (complément demandé, documents existants conservés), au moins un
+   * fichier suffit — voir replaceDocuments.
+   */
+  private async readNamedDocuments(
+    ctx: HttpContext,
+    requirements: DocumentRequirement[],
+    options: { requireAll: boolean }
+  ): Promise<
+    | { ok: true; documents: Array<{ key: string; filename: string; mimeType: string; data: Buffer }> }
+    | { ok: false; status: number; body: Record<string, unknown> }
+  > {
+    const documents: Array<{ key: string; filename: string; mimeType: string; data: Buffer }> = []
+
+    for (const req of requirements) {
+      const file = ctx.request.file(req.key, { size: DOCUMENT_MAX_SIZE, extnames: DOCUMENT_EXTNAMES })
+      if (!file) {
+        if (options.requireAll && req.required) {
+          return { ok: false, status: 422, body: { error: 'document_required', detail: req.key } }
+        }
+        continue
+      }
+      if (!file.isValid) {
+        return { ok: false, status: 422, body: { error: 'invalid_document', detail: file.errors } }
+      }
+      const mimeType = `${file.type}/${file.subtype}`
+      if (!DOCUMENT_ALLOWED_MIME_TYPES.includes(mimeType)) {
+        return { ok: false, status: 422, body: { error: 'invalid_document', detail: 'unsupported_type' } }
+      }
+      const original = await readFile(file.tmpPath!)
+      const processed = await processDocument(original, mimeType)
+      documents.push({ key: req.key, filename: file.clientName, mimeType: processed.mimeType, data: processed.data })
+    }
+
+    if (documents.length === 0) {
+      return { ok: false, status: 422, body: { error: 'documents_required' } }
+    }
+
+    return { ok: true, documents }
   }
 
   /**
@@ -401,7 +430,7 @@ export default class RegistrationsController {
       formResponses: Record<string, unknown> | null
       frontRedirectUrl: string
     },
-    documents?: Array<{ filename: string; mimeType: string; data: Buffer }>
+    documents?: Array<{ key: string; filename: string; mimeType: string; data: Buffer }>
   ) {
     const { orgId } = ctx.internalAuth
     const totalPriceCents = event.priceCents * input.quantity
@@ -449,7 +478,7 @@ export default class RegistrationsController {
     // le prix — la confirmation/demande de paiement n'arrive qu'après
     // validation par l'agent (parcours C). Sans justificatif : statut
     // final immédiat (parcours A/B).
-    const initialStatus = event.requiresDocuments ? 'awaiting_review' : isFree ? 'confirmed' : 'awaiting_payment'
+    const initialStatus = eventRequiresDocuments(event) ? 'awaiting_review' : isFree ? 'confirmed' : 'awaiting_payment'
 
     const registration = await db.transaction(async (trx) => {
       const r = await Registration.create(
@@ -479,7 +508,7 @@ export default class RegistrationsController {
       return r
     })
 
-    if (event.requiresDocuments) {
+    if (eventRequiresDocuments(event)) {
       // awaiting_review : l'agent doit d'abord valider les justificatifs
       // avant tout email/paiement (parcours C).
       return ctx.response.status(201).send({
@@ -546,13 +575,14 @@ export default class RegistrationsController {
 
   private async storeDocuments(
     registrationId: number,
-    documents: Array<{ filename: string; mimeType: string; data: Buffer }>,
+    documents: Array<{ key: string; filename: string; mimeType: string; data: Buffer }>,
     trx: TransactionClientContract
   ) {
     for (const doc of documents) {
       await RegistrationDocument.create(
         {
           registrationId,
+          documentKey: doc.key,
           filename: doc.filename,
           mimeType: doc.mimeType,
           fileData: doc.data,
@@ -585,7 +615,7 @@ export default class RegistrationsController {
   async replaceDocuments(ctx: HttpContext) {
     const found = await findRegistrationByAccessToken(ctx.internalAuth.orgId, ctx.params.accessToken)
     if (!found) return ctx.response.status(404).send({ error: 'registration_not_found' })
-    const { registration } = found
+    const { registration, event } = found
 
     if (registration.status !== 'rejected') {
       return ctx.response.status(409).send({ error: 'registration_not_rejected' })
@@ -594,43 +624,34 @@ export default class RegistrationsController {
       return ctx.response.status(422).send({ error: 'document_deadline_passed' })
     }
 
-    const files = ctx.request.files('documents', {
-      size: DOCUMENT_MAX_SIZE,
-      extnames: DOCUMENT_EXTNAMES,
+    const requirements = event.documentRequirements ?? []
+    // Vrai rejet : toutes les exigences doivent être redéposées (les
+    // anciens documents seront invalidés). Complément demandé
+    // (keepExistingDocuments) : au moins une pièce suffit, les autres
+    // restent telles que déposées initialement.
+    const result = await this.readNamedDocuments(ctx, requirements, {
+      requireAll: !registration.keepExistingDocuments,
     })
-    if (files.length === 0) {
-      return ctx.response.status(422).send({ error: 'documents_required' })
-    }
-    if (files.length > MAX_DOCUMENTS) {
-      return ctx.response.status(422).send({ error: 'too_many_documents' })
-    }
-    for (const file of files) {
-      if (!file.isValid) {
-        return ctx.response.status(422).send({ error: 'invalid_document', detail: file.errors })
-      }
-      const mimeType = `${file.type}/${file.subtype}`
-      if (!DOCUMENT_ALLOWED_MIME_TYPES.includes(mimeType)) {
-        return ctx.response.status(422).send({ error: 'invalid_document', detail: 'unsupported_type' })
-      }
-    }
-
-    const processedFiles = await Promise.all(
-      files.map(async (file) => {
-        const mimeType = `${file.type}/${file.subtype}`
-        const original = await readFile(file.tmpPath!)
-        const processed = await processDocument(original, mimeType)
-        return { filename: file.clientName, mimeType: processed.mimeType, data: processed.data }
-      })
-    )
+    if (!result.ok) return ctx.response.status(result.status).send(result.body)
+    const processedFiles = result.documents
 
     await db.transaction(async (trx) => {
-      // Un vrai rejet invalide les anciens documents (tout redéposer) ;
-      // une demande de complément (keepExistingDocuments) les laisse
-      // `isCurrent` — les nouveaux s'ajoutent, l'agent voit les deux.
       if (!registration.keepExistingDocuments) {
+        // Vrai rejet : tout l'ancien jeu de documents est invalidé, le
+        // citoyen redépose tout.
         await RegistrationDocument.query({ client: trx })
           .where('registrationId', registration.id)
           .update({ isCurrent: false })
+      } else {
+        // Complément demandé : seules les exigences effectivement
+        // redéposées ici remplacent leur version courante — les autres
+        // pièces déjà déposées restent `isCurrent` inchangées.
+        for (const doc of processedFiles) {
+          await RegistrationDocument.query({ client: trx })
+            .where('registrationId', registration.id)
+            .where('documentKey', doc.key)
+            .update({ isCurrent: false })
+        }
       }
 
       await this.storeDocuments(registration.id, processedFiles, trx)
@@ -700,7 +721,7 @@ export default class RegistrationsController {
       registration.waitlistNotifiedAt = null
       registration.waitlistResponseDeadline = null
 
-      if (event.requiresDocuments) {
+      if (eventRequiresDocuments(event)) {
         registration.status = 'awaiting_review'
         await registration.save()
         return ctx.response.send({ data: { status: registration.status } })

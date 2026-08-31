@@ -10,6 +10,11 @@ export default class RegistrationDocument extends BaseModel {
   @column()
   declare registrationId: number
 
+  // Rattache ce fichier à une exigence précise de l'évènement (voir
+  // Event.documentRequirements) — jamais un dépôt générique non identifié.
+  @column()
+  declare documentKey: string
+
   @column()
   declare filename: string
 

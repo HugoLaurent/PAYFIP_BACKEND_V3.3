@@ -18,6 +18,18 @@ export interface FormField {
   options?: string[]
 }
 
+// Une exigence = un slot de dépôt nommé côté citoyen (ex. "Pièce
+// d'identité", "Certificat médical") — jamais un fourre-tout qui
+// forcerait à fusionner plusieurs documents en un seul fichier. `key`
+// identifie aussi le champ multipart envoyé par le front et la colonne
+// `document_key` sur registration_documents (voir registrations_controller.ts).
+export interface DocumentRequirement {
+  key: string
+  label: string
+  instructions?: string
+  required: boolean
+}
+
 export default class Event extends BaseModel {
   @column({ isPrimary: true })
   declare id: number
@@ -67,11 +79,10 @@ export default class Event extends BaseModel {
   @column()
   declare priceCents: number
 
-  @column()
-  declare requiresDocuments: boolean
-
-  @column()
-  declare documentInstructions: string | null
+  @column({
+    prepare: (value: DocumentRequirement[] | null) => (value ? JSON.stringify(value) : null),
+  })
+  declare documentRequirements: DocumentRequirement[] | null
 
   // null = illimité, voir capacity_service.ts.
   @column()

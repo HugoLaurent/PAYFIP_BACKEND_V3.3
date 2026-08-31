@@ -66,8 +66,7 @@ function serializeEventForAgent(event: Event) {
     category: event.category,
     registrationDeadline: event.registrationDeadline?.toISO() ?? null,
     priceCents: event.priceCents,
-    requiresDocuments: event.requiresDocuments,
-    documentInstructions: event.documentInstructions,
+    documentRequirements: event.documentRequirements,
     capacity: event.capacity,
     maxParticipantsPerRegistration: event.maxParticipantsPerRegistration,
     formSchema: event.formSchema,
@@ -94,8 +93,7 @@ async function serializeEventForCitizen(event: Event) {
     category: event.category,
     registrationDeadline: event.registrationDeadline?.toISO() ?? null,
     priceCents: event.priceCents,
-    requiresDocuments: event.requiresDocuments,
-    documentInstructions: event.documentInstructions,
+    documentRequirements: event.documentRequirements,
     capacity: event.capacity,
     maxParticipantsPerRegistration: event.maxParticipantsPerRegistration,
     formSchema: event.formSchema,
@@ -236,8 +234,7 @@ export default class EventsController {
       category: payload.category ?? null,
       registrationDeadline: payload.registrationDeadline ?? null,
       priceCents: payload.priceCents,
-      requiresDocuments: payload.requiresDocuments,
-      documentInstructions: payload.documentInstructions ?? null,
+      documentRequirements: payload.documentRequirements ?? null,
       capacity: payload.capacity ?? null,
       maxParticipantsPerRegistration: payload.maxParticipantsPerRegistration ?? 1,
       formSchema: payload.formSchema ?? null,
@@ -297,8 +294,7 @@ export default class EventsController {
     if (payload.category !== undefined) event.category = payload.category
     if (payload.registrationDeadline !== undefined) event.registrationDeadline = payload.registrationDeadline
     if (payload.priceCents !== undefined) event.priceCents = payload.priceCents
-    if (payload.requiresDocuments !== undefined) event.requiresDocuments = payload.requiresDocuments
-    if (payload.documentInstructions !== undefined) event.documentInstructions = payload.documentInstructions
+    if (payload.documentRequirements !== undefined) event.documentRequirements = payload.documentRequirements
     if (payload.capacity !== undefined) event.capacity = payload.capacity
     if (payload.maxParticipantsPerRegistration !== undefined) {
       event.maxParticipantsPerRegistration = payload.maxParticipantsPerRegistration
