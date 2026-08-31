@@ -5,11 +5,6 @@ import type { Config } from '@japa/runner/types'
 import { pluginAdonisJS } from '@japa/plugin-adonisjs'
 import { dbAssertions } from '@adonisjs/lucid/plugins/db'
 import testUtils from '@adonisjs/core/services/test_utils'
-import type { Registry } from '../.adonisjs/client/registry/schema.d.ts'
-
-declare module '@japa/api-client/types' {
-  interface RoutesRegistry extends Registry {}
-}
 
 export const plugins: Config['plugins'] = [
   assert(),
