@@ -130,6 +130,7 @@ export default class InscriptionAgentsController {
         scope: 'inscription',
         role,
         servicePermissions: buildServicePermissions(services),
+        serviceIds: services.map((s) => s.id),
         aud: 'svc-inscription',
       },
       binary: true,
