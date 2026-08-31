@@ -166,6 +166,28 @@ export default class EventsController {
   }
 
   /**
+   * GET /events/pending-review-count — total (tous évènements/services
+   * confondus, parmi ceux accessibles à l'agent) d'inscriptions
+   * `awaiting_review`, pour le badge de notification global côté
+   * payfip-front (voir NotificationBell.tsx) — juste un compteur, aucun
+   * détail par évènement contrairement à index().
+   */
+  async pendingReviewCount(ctx: HttpContext) {
+    const { orgId, serviceIds } = ctx.internalAuth
+    if (!serviceIds || serviceIds.length === 0) {
+      return ctx.response.send({ data: { count: 0 } })
+    }
+
+    const rows = await Registration.query()
+      .where('orgId', orgId)
+      .whereIn('serviceId', serviceIds)
+      .where('status', 'awaiting_review')
+      .count('* as total')
+
+    return ctx.response.send({ data: { count: Number(rows[0].$extras.total) } })
+  }
+
+  /**
    * GET /events/:id — public si l'évènement est `published`, sinon
    * réservé à un agent avec `canManageTariffs` sur son service (aperçu
    * d'un évènement en brouillon avant publication). Utilisé côté agent

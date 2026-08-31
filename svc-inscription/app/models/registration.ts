@@ -93,6 +93,9 @@ export default class Registration extends BaseModel {
   declare reviewedAt: DateTime | null
 
   @column.dateTime()
+  declare lastReminderSentAt: DateTime | null
+
+  @column.dateTime()
   declare otpVerifiedAt: DateTime | null
 
   @column.dateTime()

@@ -49,6 +49,12 @@ const DOCUMENT_ALLOWED_MIME_TYPES = ['application/pdf', 'image/png', 'image/jpeg
 // d'attente).
 const DOCUMENT_RESUBMIT_DEADLINE_DAYS = 7
 
+// Délai minimum entre deux clics sur "Relancer" (voir #resendReminder) —
+// garde-fou anti-spam, pas une vraie limite métier : assez court pour
+// rester utile le jour même, assez long pour qu'un double-clic ou un agent
+// impatient n'inonde pas le citoyen.
+const REMINDER_COOLDOWN_MINUTES = 15
+
 function eventRequiresDocuments(event: Event): boolean {
   return (event.documentRequirements?.length ?? 0) > 0
 }
@@ -1035,6 +1041,57 @@ export default class RegistrationsController {
       await registration.save()
       await sendPaymentRequestEmail(registration, event)
     }
+
+    return ctx.response.send({ data: serializeRegistrationForAgent(registration) })
+  }
+
+  /**
+   * POST /registrations/:id/resend-reminder — l'agent renvoie manuellement
+   * l'email déjà attendu par le citoyen (demande de paiement ou redépôt de
+   * justificatif) quand ça traîne — pas une nouvelle décision, juste un
+   * rappel du même contenu.
+   */
+  async resendReminder(ctx: HttpContext) {
+    const { orgId, role, servicePermissions, serviceIds } = ctx.internalAuth
+
+    const registration = await Registration.query()
+      .where('id', Number(ctx.params.id))
+      .where('orgId', orgId)
+      .first()
+    if (!registration) return ctx.response.status(404).send({ error: 'registration_not_found' })
+
+    if (!serviceIds?.includes(registration.serviceId)) {
+      return ctx.response.status(403).send({ error: 'service_not_allowed_for_agent' })
+    }
+    if (role !== 'admin' && !servicePermissions?.[String(registration.serviceId)]?.canScan) {
+      return ctx.response.status(403).send({ error: 'permission_required' })
+    }
+
+    if (registration.status !== 'awaiting_payment' && registration.status !== 'rejected') {
+      return ctx.response.status(409).send({ error: 'nothing_to_resend' })
+    }
+
+    if (registration.lastReminderSentAt) {
+      const minutesSinceLast = DateTime.now().diff(registration.lastReminderSentAt, 'minutes').minutes
+      if (minutesSinceLast < REMINDER_COOLDOWN_MINUTES) {
+        return ctx.response.status(429).send({
+          error: 'reminder_cooldown',
+          retryAfterMinutes: Math.ceil(REMINDER_COOLDOWN_MINUTES - minutesSinceLast),
+        })
+      }
+    }
+
+    const event = await Event.find(registration.eventId)
+    if (!event) return ctx.response.status(404).send({ error: 'event_not_found' })
+
+    if (registration.status === 'awaiting_payment') {
+      await sendPaymentRequestEmail(registration, event)
+    } else {
+      await sendRegistrationRejectionEmail(registration, event)
+    }
+
+    registration.lastReminderSentAt = DateTime.now()
+    await registration.save()
 
     return ctx.response.send({ data: serializeRegistrationForAgent(registration) })
   }

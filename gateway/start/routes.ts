@@ -228,6 +228,14 @@ router
       InscriptionAgentsController,
       'downloadDocument',
     ])
+    router.post('/inscription/registrations/:id/resend-reminder', [
+      InscriptionAgentsController,
+      'resendReminder',
+    ])
+    router.get('/inscription/pending-review-count', [
+      InscriptionAgentsController,
+      'pendingReviewCount',
+    ])
   })
   .use(middleware.clientAuth())
 

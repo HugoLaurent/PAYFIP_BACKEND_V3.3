@@ -26,6 +26,8 @@ router
     router.post('/otp/verify', [OtpsController, 'verify'])
 
     router.get('/events', [EventsController, 'index'])
+    // Avant '/events/:id' : sinon ':id' capture "pending-review-count".
+    router.get('/events/pending-review-count', [EventsController, 'pendingReviewCount'])
     router.get('/events/by-slug/:slug', [EventsController, 'showBySlug'])
     router.get('/events/:id', [EventsController, 'show'])
     router.post('/services/:id/events', [EventsController, 'store'])
@@ -61,6 +63,7 @@ router
 
     router.get('/events/:id/registrations', [RegistrationsController, 'index'])
     router.post('/registrations/:id/review', [RegistrationsController, 'review'])
+    router.post('/registrations/:id/resend-reminder', [RegistrationsController, 'resendReminder'])
     router.get('/registrations/:id/documents/:documentId', [
       RegistrationsController,
       'downloadDocument',
