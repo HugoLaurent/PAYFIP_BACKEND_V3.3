@@ -64,18 +64,16 @@ export default class InscriptionPublicsController {
   }
 
   /**
-   * Dépôt initial d'inscription avec justificatifs — multipart, 1 à 5
-   * fichiers sous la clé `documents`, plus les champs texte de
-   * l'inscription à côté (voir proxyMultipartUpload : proxyRequest ne
-   * relaie que du JSON).
+   * Dépôt initial d'inscription avec justificatifs — multipart, un fichier
+   * par exigence nommée (clé = DocumentRequirement.key, jusqu'à 5), plus
+   * les champs texte de l'inscription à côté (voir proxyMultipartUpload :
+   * proxyRequest ne relaie que du JSON).
    */
   async createRegistrationWithDocuments(ctx: HttpContext) {
     const orgId = String(ctx.request.input('orgId'))
     await proxyMultipartUpload(ctx, {
       targetUrl: `${base()}/registrations/with-documents`,
       jwt: { orgId, scope: 'inscription', aud: 'svc-inscription' },
-      fileFieldName: 'documents',
-      multiple: true,
       maxSize: '8mb',
       extnames: ['pdf', 'png', 'jpg', 'jpeg'],
       fields: ['eventId', 'email', 'firstName', 'lastName', 'quantity', 'formResponses'],
@@ -111,8 +109,6 @@ export default class InscriptionPublicsController {
     await proxyMultipartUpload(ctx, {
       targetUrl: `${base()}/registrations/by-token/${ctx.params.accessToken}/documents`,
       jwt: { orgId, scope: 'inscription', aud: 'svc-inscription' },
-      fileFieldName: 'documents',
-      multiple: true,
       maxSize: '8mb',
       extnames: ['pdf', 'png', 'jpg', 'jpeg'],
       fields: [],

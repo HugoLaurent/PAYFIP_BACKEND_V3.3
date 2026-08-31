@@ -1,5 +1,6 @@
 import { readFile } from 'node:fs/promises'
 import type { HttpContext } from '@adonisjs/core/http'
+import type { MultipartFile } from '@adonisjs/bodyparser/types'
 import { mintInternalJwt, type InternalJwtClaims } from '#services/internal_jwt_service'
 import { fetchWithTimeout } from '#services/fetch_with_timeout'
 
@@ -135,8 +136,6 @@ export async function proxyUpload(ctx: HttpContext, options: ProxyUploadOptions)
 export interface ProxyMultipartUploadOptions {
   targetUrl: string
   jwt: InternalJwtClaims
-  fileFieldName: string
-  multiple?: boolean
   maxSize: string
   extnames: string[]
   fields: string[]
@@ -148,39 +147,43 @@ export interface ProxyMultipartUploadOptions {
  * nom, prénom, eventId + 1 à N fichiers) — proxyUpload reste dédié au cas
  * logo/cover à un seul fichier, sans autre champ, pour ne pas complexifier
  * ce chemin qui reste le plus fréquent.
+ *
+ * Ne suppose plus un unique nom de champ fichier : chaque exigence de
+ * document a sa propre clé côté citoyen (voir DocumentRequirement,
+ * FileUploadField), le nombre et les noms des champs multipart ne sont
+ * connus qu'à la requête — on relaie donc tout fichier présent, sous son
+ * nom de champ d'origine.
  */
 export async function proxyMultipartUpload(
   ctx: HttpContext,
   options: ProxyMultipartUploadOptions
 ): Promise<void> {
+  const fieldNames = Object.keys(ctx.request.allFiles())
   const fileOptions = { size: options.maxSize, extnames: options.extnames }
-  const files = options.multiple
-    ? ctx.request.files(options.fileFieldName, fileOptions)
-    : (() => {
-        const single = ctx.request.file(options.fileFieldName, fileOptions)
-        return single ? [single] : []
-      })()
 
-  if (files.length === 0) {
-    ctx.response.status(400).send({ error: `${options.fileFieldName}_required` })
+  const namedFiles: Array<{ field: string; file: MultipartFile }> = []
+  for (const field of fieldNames) {
+    for (const file of ctx.request.files(field, fileOptions)) {
+      namedFiles.push({ field, file })
+    }
+  }
+
+  if (namedFiles.length === 0) {
+    ctx.response.status(400).send({ error: 'documents_required' })
     return
   }
-  const invalid = files.find((file) => !file.isValid)
+  const invalid = namedFiles.find(({ file }) => !file.isValid)
   if (invalid) {
     ctx.response
       .status(400)
-      .send({ error: `invalid_${options.fileFieldName}`, detail: invalid.errors })
+      .send({ error: `invalid_${invalid.field}`, detail: invalid.file.errors })
     return
   }
 
   const uploadFormData = new FormData()
-  for (const file of files) {
+  for (const { field, file } of namedFiles) {
     const buffer = await readFile(file.tmpPath!)
-    uploadFormData.append(
-      options.fileFieldName,
-      new Blob([buffer], { type: `${file.type}/${file.subtype}` }),
-      file.clientName
-    )
+    uploadFormData.append(field, new Blob([buffer], { type: `${file.type}/${file.subtype}` }), file.clientName)
   }
   for (const field of options.fields) {
     const value = ctx.request.input(field)
