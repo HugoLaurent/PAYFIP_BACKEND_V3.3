@@ -51,7 +51,12 @@ function isAgentRequest(internalAuth: HttpContext['internalAuth']): boolean {
   return internalAuth.role !== undefined || internalAuth.servicePermissions !== undefined
 }
 
-function serializeEventForAgent(event: Event) {
+async function serializeEventForAgent(event: Event) {
+  // Remplissage ("18/30 inscrits") plutôt que la seule capacité — voir
+  // maquette Claude Design "Service Inscriptions.dc.html" §"Le remplissage
+  // plutôt que la capacité". Même décompte que côté citoyen (capacity_service).
+  const registeredCount = await computeSeatsHeld(event.id)
+
   return {
     id: event.id,
     slug: event.slug,
@@ -72,6 +77,7 @@ function serializeEventForAgent(event: Event) {
     formSchema: event.formSchema,
     status: event.status,
     createdAt: event.createdAt.toISO(),
+    registeredCount,
   }
 }
 
@@ -144,10 +150,12 @@ export default class EventsController {
       const pendingByEvent = new Map(pendingRows.map((r) => [r.eventId, Number(r.$extras.total)]))
 
       return ctx.response.send({
-        data: events.map((e) => ({
-          ...serializeEventForAgent(e),
-          pendingReviewCount: pendingByEvent.get(e.id) ?? 0,
-        })),
+        data: await Promise.all(
+          events.map(async (e) => ({
+            ...(await serializeEventForAgent(e)),
+            pendingReviewCount: pendingByEvent.get(e.id) ?? 0,
+          }))
+        ),
       })
     }
 
@@ -207,7 +215,7 @@ export default class EventsController {
       if (!canManage) {
         return ctx.response.status(404).send({ error: 'event_not_found' })
       }
-      return ctx.response.send({ data: serializeEventForAgent(event) })
+      return ctx.response.send({ data: await serializeEventForAgent(event) })
     }
 
     return ctx.response.send({ data: await serializeEventForCitizen(event) })
@@ -284,7 +292,7 @@ export default class EventsController {
       status: payload.status ?? 'draft',
     })
 
-    return ctx.response.status(201).send({ data: serializeEventForAgent(event) })
+    return ctx.response.status(201).send({ data: await serializeEventForAgent(event) })
   }
 
   /**
@@ -347,7 +355,7 @@ export default class EventsController {
 
     await event.save()
 
-    return ctx.response.send({ data: serializeEventForAgent(event) })
+    return ctx.response.send({ data: await serializeEventForAgent(event) })
   }
 
   /**
@@ -403,7 +411,7 @@ export default class EventsController {
       notifiedCount += 1
     }
 
-    return ctx.response.send({ data: serializeEventForAgent(event), notifiedCount })
+    return ctx.response.send({ data: await serializeEventForAgent(event), notifiedCount })
   }
 
   /**
