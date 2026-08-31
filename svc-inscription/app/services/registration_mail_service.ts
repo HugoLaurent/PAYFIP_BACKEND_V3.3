@@ -46,9 +46,16 @@ async function loadServiceIdentity(orgId: number, serviceId: number): Promise<Se
  * techniquement pas besoin pour résoudre l'inscription (l'accessToken
  * suffit), seulement pour l'affichage de l'en-tête du service.
  */
-function buildFrontUrl(slug: string | undefined, serviceId: number, accessToken: string): string {
+function buildFrontUrl(
+  slug: string | undefined,
+  serviceId: number,
+  accessToken: string,
+  orgId: number
+): string {
   const segment = slug ?? String(serviceId)
-  return `${env.get('FRONT_PUBLIC_BASE_URL')}/inscription/${segment}/retour?accessToken=${accessToken}`
+  // orgId est requis par InscriptionReturnPage (missingParams) même en
+  // mode instantané — voir payfip-front/src/pages/public/InscriptionReturnPage.tsx.
+  return `${env.get('FRONT_PUBLIC_BASE_URL')}/inscription/${segment}/retour?accessToken=${accessToken}&orgId=${orgId}`
 }
 
 /**
@@ -132,7 +139,7 @@ export async function sendPaymentRequestEmail(registration: Registration, event:
         email: registration.email,
         eventTitle: event.title,
         amountCents: registration.priceCentsAtRegistration,
-        payUrl: buildFrontUrl(identity.slug, registration.serviceId, registration.accessToken!),
+        payUrl: buildFrontUrl(identity.slug, registration.serviceId, registration.accessToken!, registration.orgId),
         serviceName: identity.name,
         orgName: identity.orgName,
         logoUrl: identity.logoUrl,
@@ -156,7 +163,7 @@ export async function sendRegistrationRejectionEmail(
         eventTitle: event.title,
         rejectionReason: registration.rejectionReason,
         documentDeadlineAt: registration.documentDeadlineAt?.toFormat('dd/MM/yyyy'),
-        redepositUrl: buildFrontUrl(identity.slug, registration.serviceId, registration.accessToken!),
+        redepositUrl: buildFrontUrl(identity.slug, registration.serviceId, registration.accessToken!, registration.orgId),
         serviceName: identity.name,
         orgName: identity.orgName,
         logoUrl: identity.logoUrl,
@@ -209,7 +216,7 @@ export async function sendWaitlistOfferEmail(registration: Registration, event: 
         email: registration.email,
         eventTitle: event.title,
         waitlistResponseDeadline: registration.waitlistResponseDeadline?.toFormat('dd/MM/yyyy HH:mm'),
-        confirmUrl: buildFrontUrl(identity.slug, registration.serviceId, registration.accessToken!),
+        confirmUrl: buildFrontUrl(identity.slug, registration.serviceId, registration.accessToken!, registration.orgId),
         serviceName: identity.name,
         orgName: identity.orgName,
         logoUrl: identity.logoUrl,
