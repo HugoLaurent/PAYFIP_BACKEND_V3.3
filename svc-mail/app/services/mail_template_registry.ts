@@ -33,7 +33,10 @@ const ticketConfirmationValidator = vine.compile(
     confirmation: vine.string().trim().minLength(1),
     visitDate: vine.string().trim().minLength(1),
     billetsSummary: vine.string().trim().minLength(1),
-    totalAmountCents: vine.number().positive(),
+    // .min(0) et pas .positive() : un tarif à 0€ est un cas normal côté
+    // billetterie (voir tariff.ts), la confirmation gratuite doit pouvoir
+    // s'envoyer comme n'importe quelle autre.
+    totalAmountCents: vine.number().min(0),
     // Identité du service émetteur — absente seulement si svc-auth était
     // injoignable au moment de l'envoi, l'email dégrade alors vers un
     // en-tête générique plutôt que d'échouer.

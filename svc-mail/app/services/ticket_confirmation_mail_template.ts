@@ -22,6 +22,8 @@ const BLUE_TINT = '#e6f3fa'
 const MARINE = '#223499'
 
 export function renderTicketConfirmationEmail(data: TicketConfirmationEmailData): string {
+  const amountLabel = data.totalAmountCents === 0 ? 'Gratuit' : `${euros(data.totalAmountCents)} €`
+
   return `<!DOCTYPE html>
 <html lang="fr">
 <head>
@@ -67,7 +69,7 @@ export function renderTicketConfirmationEmail(data: TicketConfirmationEmailData)
             <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#f2f5fb; border-radius:12px;">
               <tr>
                 <td style="padding:16px 20px; font-size:14px; font-weight:600; color:#4f5661;">Total payé</td>
-                <td align="right" style="padding:16px 20px; font-size:22px; font-weight:800; color:${MARINE};">${euros(data.totalAmountCents)} €</td>
+                <td align="right" style="padding:16px 20px; font-size:22px; font-weight:800; color:${MARINE};">${amountLabel}</td>
               </tr>
             </table>
           </td></tr>
