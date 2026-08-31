@@ -5,6 +5,7 @@ import vine from '@vinejs/vine'
 import Service from '#models/service'
 import ServiceClosure from '#models/service_closure'
 import Organization from '#models/organization'
+import User from '#models/user'
 import UserServiceAssignment from '#models/user_service_assignment'
 import {
   createServiceValidator,
@@ -515,6 +516,45 @@ export default class ServicesController {
         ...availability,
       },
     })
+  }
+
+  /**
+   * GET /services/:id/notification-recipients — emails des personnes à
+   * prévenir d'un évènement nécessitant une action côté organisme (ex.
+   * une inscription en attente de vérification, voir
+   * registration_mail_service.ts#notifyAgentsOfPendingReview côté
+   * svc-inscription). Les admins de l'organisme + les agents avec
+   * `canScan` sur ce service précis — c'est la permission qui autorise
+   * déjà la revue de justificatifs, pas la peine d'en inventer une
+   * nouvelle. Réservé au scope 'inscription' pour l'instant, seul
+   * consommateur.
+   */
+  async notificationRecipients(ctx: HttpContext) {
+    if (ctx.internalAuth.scope !== 'inscription') {
+      return ctx.response.status(403).send({ error: 'scope_not_allowed' })
+    }
+
+    const { orgId } = await ctx.request.validateUsing(lookupValidator)
+    const serviceId = Number(ctx.params.id)
+
+    const service = await Service.query().where('id', serviceId).where('orgId', orgId).first()
+    if (!service) {
+      return ctx.response.status(404).send({ error: 'service_not_found' })
+    }
+
+    const admins = await User.query().where('orgId', orgId).where('role', 'admin').where('status', 'active')
+    const scanners = await UserServiceAssignment.query()
+      .where('serviceId', serviceId)
+      .where('canScan', true)
+      .preload('user', (q) => q.where('status', 'active'))
+
+    const emails = new Set<string>()
+    for (const admin of admins) emails.add(admin.email)
+    for (const assignment of scanners) {
+      if (assignment.user) emails.add(assignment.user.email)
+    }
+
+    return ctx.response.send({ data: { emails: [...emails] } })
   }
 
   /**

@@ -4,7 +4,7 @@ import env from '#start/env'
 import type Registration from '#models/registration'
 import type Event from '#models/event'
 import { sendMail } from '#services/svc_mail_client'
-import { fetchServiceStatus } from '#services/svc_auth_client'
+import { fetchServiceStatus, fetchNotificationRecipients } from '#services/svc_auth_client'
 import FailedRegistrationMail from '#models/failed_registration_mail'
 import type { FailedRegistrationMailKind } from '#models/failed_registration_mail'
 import { notifyOpsAlert } from '#services/ops_alert_service'
@@ -216,4 +216,44 @@ export async function sendWaitlistOfferEmail(registration: Registration, event: 
       },
     })
   )
+}
+
+/**
+ * Prévient les admins de l'organisme + les agents avec `canScan` sur ce
+ * service qu'une inscription attend leur vérification (justificatifs
+ * déposés initialement, ou redéposés après une demande de complément) —
+ * jusqu'ici rien ne les avertissait, ils ne le découvraient qu'en
+ * consultant le tableau de bord. Best-effort et sans ticket de retry
+ * (contrairement aux autres emails de ce fichier) : c'est une notification
+ * de confort, pas une étape du parcours citoyen, et FailedRegistrationMail
+ * n'autorise qu'une seule ligne par inscription — la réserver aux emails
+ * réellement attendus par le citoyen.
+ */
+export async function notifyAgentsOfPendingReview(registration: Registration, event: Event): Promise<void> {
+  const emails = await fetchNotificationRecipients(registration.orgId, registration.serviceId)
+  if (emails.length === 0) return
+
+  const identity = await loadServiceIdentity(registration.orgId, registration.serviceId)
+
+  for (const email of emails) {
+    try {
+      await sendMail({
+        template: 'inscription_agent_review_needed',
+        to: email,
+        data: {
+          email,
+          eventTitle: event.title,
+          registrantName: `${registration.firstName} ${registration.lastName}`,
+          serviceName: identity.name,
+          orgName: identity.orgName,
+          logoUrl: identity.logoUrl,
+        },
+      })
+    } catch (error) {
+      logger.warn(
+        { registrationId: registration.id, email, error },
+        "registration_mail_service: échec de la notification agent"
+      )
+    }
+  }
 }

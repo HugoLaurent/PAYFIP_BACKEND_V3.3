@@ -33,6 +33,7 @@ router
     router.patch('/me/password', [ProfileController, 'changePassword'])
     router.get('/services/:id/payfip-account', [ServicesController, 'payfipAccount'])
     router.get('/services/:id/status', [ServicesController, 'status'])
+    router.get('/services/:id/notification-recipients', [ServicesController, 'notificationRecipients'])
     router.get('/services/:id/label', [ServicesController, 'label'])
     router.get('/services/by-numcli/:numcli', [ServicesController, 'byNumcli'])
 

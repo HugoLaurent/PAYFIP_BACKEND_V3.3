@@ -32,6 +32,7 @@ import {
   sendRegistrationConfirmationEmail,
   sendPaymentRequestEmail,
   sendRegistrationRejectionEmail,
+  notifyAgentsOfPendingReview,
 } from '#services/registration_mail_service'
 
 // Documents : PDF/PNG/JPEG, 8 Mo/fichier — un fichier par exigence nommée
@@ -511,6 +512,7 @@ export default class RegistrationsController {
     if (eventRequiresDocuments(event)) {
       // awaiting_review : l'agent doit d'abord valider les justificatifs
       // avant tout email/paiement (parcours C).
+      await notifyAgentsOfPendingReview(registration, event)
       return ctx.response.status(201).send({
         data: {
           registrationId: registration.id,
@@ -664,6 +666,8 @@ export default class RegistrationsController {
       }).save()
     })
 
+    await notifyAgentsOfPendingReview(registration, event)
+
     return ctx.response.send({ data: { status: registration.status } })
   }
 
@@ -724,6 +728,7 @@ export default class RegistrationsController {
       if (eventRequiresDocuments(event)) {
         registration.status = 'awaiting_review'
         await registration.save()
+        await notifyAgentsOfPendingReview(registration, event)
         return ctx.response.send({ data: { status: registration.status } })
       }
 

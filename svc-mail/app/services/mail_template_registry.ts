@@ -7,6 +7,7 @@ import { renderInscriptionPaymentRequestEmail } from '#services/inscription_paym
 import { renderInscriptionRegistrationRejectedEmail } from '#services/inscription_registration_rejected_mail_template'
 import { renderInscriptionWaitlistOfferEmail } from '#services/inscription_waitlist_offer_mail_template'
 import { renderInscriptionEventCancelledEmail } from '#services/inscription_event_cancelled_mail_template'
+import { renderInscriptionAgentReviewNeededEmail } from '#services/inscription_agent_review_needed_mail_template'
 
 export const MAIL_TEMPLATE_NAMES = [
   'otp_code',
@@ -17,6 +18,7 @@ export const MAIL_TEMPLATE_NAMES = [
   'inscription_registration_rejected',
   'inscription_waitlist_offer',
   'inscription_event_cancelled',
+  'inscription_agent_review_needed',
 ] as const
 export type MailTemplateName = (typeof MAIL_TEMPLATE_NAMES)[number]
 
@@ -125,6 +127,17 @@ const inscriptionEventCancelledValidator = vine.compile(
   })
 )
 
+const inscriptionAgentReviewNeededValidator = vine.compile(
+  vine.object({
+    email: vine.string().trim().email(),
+    eventTitle: vine.string().trim().minLength(1),
+    registrantName: vine.string().trim().minLength(1),
+    serviceName: vine.string().trim().optional(),
+    orgName: vine.string().trim().optional(),
+    logoUrl: vine.string().trim().url().optional(),
+  })
+)
+
 export interface RenderedEmail {
   subject: string
   html: string
@@ -177,6 +190,13 @@ export async function renderMailTemplate(
       return {
         subject: 'Évènement annulé',
         html: renderInscriptionEventCancelledEmail(parsed),
+      }
+    }
+    case 'inscription_agent_review_needed': {
+      const parsed = await inscriptionAgentReviewNeededValidator.validate(data)
+      return {
+        subject: 'Nouvelle inscription à vérifier',
+        html: renderInscriptionAgentReviewNeededEmail(parsed),
       }
     }
   }
