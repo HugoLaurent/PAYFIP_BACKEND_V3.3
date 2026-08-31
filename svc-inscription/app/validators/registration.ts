@@ -34,7 +34,10 @@ export const reviewRegistrationValidator = vine.compile(
     // valables, on demande juste un complément (voir
     // registrations_controller.ts#review) — distinct d'un vrai 'reject'
     // uniquement par ce qui arrive aux documents existants au redépôt.
-    decision: vine.enum(['approve', 'reject', 'request_more_documents'] as const),
+    // 'revert' : annule une décision prise par erreur (clic sur "Valider"
+    // par mégarde), remet en 'awaiting_review' — seulement quand aucun
+    // encaissement réel n'a eu lieu, voir #review.
+    decision: vine.enum(['approve', 'reject', 'request_more_documents', 'revert'] as const),
     rejectionReason: vine
       .string()
       .trim()

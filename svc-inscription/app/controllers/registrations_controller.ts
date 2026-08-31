@@ -972,11 +972,35 @@ export default class RegistrationsController {
       return ctx.response.status(403).send({ error: 'permission_required' })
     }
 
+    const payload = await ctx.request.validateUsing(reviewRegistrationValidator)
+
+    // 'revert' : annule une décision prise par erreur. Autorisé uniquement
+    // depuis 'awaiting_payment' (aucune session PayFiP ouverte tant que le
+    // citoyen n'a pas cliqué payer, voir payByToken) ou depuis 'confirmed'
+    // pour un évènement gratuit (rien n'a jamais été encaissé) — jamais
+    // depuis 'confirmed' en payant, où un vrai paiement a déjà été capturé
+    // et nécessiterait un remboursement manuel hors périmètre.
+    if (payload.decision === 'revert') {
+      const revertAllowed =
+        registration.status === 'awaiting_payment' ||
+        (registration.status === 'confirmed' && registration.paymentMethod === 'free')
+      if (!revertAllowed) {
+        return ctx.response.status(409).send({ error: 'revert_not_allowed' })
+      }
+
+      registration.status = 'awaiting_review'
+      registration.reviewedBy = null
+      registration.reviewedByLabel = null
+      registration.reviewedAt = null
+      await registration.save()
+
+      return ctx.response.send({ data: serializeRegistrationForAgent(registration) })
+    }
+
     if (registration.status !== 'awaiting_review') {
       return ctx.response.status(409).send({ error: 'registration_not_awaiting_review' })
     }
 
-    const payload = await ctx.request.validateUsing(reviewRegistrationValidator)
     const event = await Event.find(registration.eventId)
     if (!event) return ctx.response.status(404).send({ error: 'event_not_found' })
 
