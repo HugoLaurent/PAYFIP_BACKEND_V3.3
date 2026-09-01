@@ -31,7 +31,6 @@ export default class extends BaseSchema {
 
       table.timestamp('consumed_at')
       table.integer('consumed_by')
-      table.string('consumed_by_label').nullable()
 
       table.timestamp('created_at').notNullable()
       table.timestamp('updated_at').notNullable()

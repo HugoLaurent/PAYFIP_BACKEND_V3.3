@@ -17,9 +17,7 @@ export default class extends BaseSchema {
         .index()
 
       table.integer('org_id').notNullable().index()
-      table.integer('service_id').nullable().index()
       table.integer('agent_id').notNullable()
-      table.string('agent_label').nullable()
 
       table.enum('result', [...SCAN_RESULTS]).notNullable()
       table.string('reason')

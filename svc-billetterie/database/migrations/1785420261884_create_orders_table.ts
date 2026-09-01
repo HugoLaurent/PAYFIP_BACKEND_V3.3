@@ -26,15 +26,10 @@ export default class extends BaseSchema {
       table.string('payment_reference').unique()
       table.integer('payment_request_id')
       table.string('payfip_id_op').nullable()
-      // Preuve de possession pour retrouver ses billets côté citoyen quand
-      // il n'y a pas de payfip_id_op (commande gratuite, jamais de session
-      // PayFiP) — générée à la création, jamais réutilisée comme payfip_id_op.
-      table.string('access_token').nullable()
 
       table.integer('retry_count').notNullable().defaultTo(0)
 
       table.integer('agent_id')
-      table.string('sold_by').nullable()
 
       table.timestamp('otp_verified_at')
 
