@@ -27,8 +27,16 @@ export default class extends BaseSeeder {
       'piscine-municipale-b'
     )
     const invoicing = await createService(orgMixte, 'Facturation Hôpital', 'factures', '006272')
+    const inscriptions = await createService(
+      orgMixte,
+      'Inscriptions Formations',
+      'inscription',
+      '095548',
+      'inscriptions-formations'
+    )
 
     await assign(agent, poolA)
+    await assign(agent, inscriptions)
 
     const orgBilletterie = await createOrg('Commune Billetterie Seule', 'commune-billetterie-seule')
     await createAdmin(orgBilletterie, 'admin@commune-billetterie-seule.test')
@@ -45,8 +53,10 @@ export default class extends BaseSeeder {
     await createService(orgFactures, 'Facturation Hôpital Sud', 'factures', '006274')
 
     console.log('--- Seed OK ---')
-    console.log(`Org 1 (mixte, id=${orgMixte.id}) : ${poolA.name}, ${poolB.name}, ${invoicing.name}`)
-    console.log(`  admin@aregie-demo-mixte.test / password (accès aux 3 services)`)
+    console.log(
+      `Org 1 (mixte, id=${orgMixte.id}) : ${poolA.name}, ${poolB.name}, ${invoicing.name}, ${inscriptions.name} (id=${inscriptions.id})`
+    )
+    console.log(`  admin@aregie-demo-mixte.test / password (accès aux 4 services, y compris Inscriptions)`)
     console.log(`  agent@aregie-demo-mixte.test / password (accès à "${poolA.name}" seulement)`)
     console.log(`Org 2 (billetterie seule, id=${orgBilletterie.id})`)
     console.log(`  admin@commune-billetterie-seule.test / password`)
