@@ -176,23 +176,46 @@ export default class EventsController {
   /**
    * GET /events/pending-review-count — total (tous évènements/services
    * confondus, parmi ceux accessibles à l'agent) d'inscriptions
-   * `awaiting_review`, pour le badge de notification global côté
-   * payfip-front (voir NotificationBell.tsx) — juste un compteur, aucun
-   * détail par évènement contrairement à index().
+   * `awaiting_review`, avec le détail par évènement (id/titre/service) pour
+   * que le menu de la cloche de notification (NotificationBell.tsx) puisse
+   * emmener directement au bon évènement plutôt que renvoyer vers la liste
+   * des services à l'aveugle.
    */
   async pendingReviewCount(ctx: HttpContext) {
     const { orgId, serviceIds } = ctx.internalAuth
     if (!serviceIds || serviceIds.length === 0) {
-      return ctx.response.send({ data: { count: 0 } })
+      return ctx.response.send({ data: { count: 0, events: [] } })
     }
 
     const rows = await Registration.query()
       .where('orgId', orgId)
       .whereIn('serviceId', serviceIds)
       .where('status', 'awaiting_review')
+      .groupBy('eventId')
       .count('* as total')
+      .select('eventId')
 
-    return ctx.response.send({ data: { count: Number(rows[0].$extras.total) } })
+    const eventIds = rows.map((r) => r.eventId)
+    const events =
+      eventIds.length > 0 ? await Event.query().whereIn('id', eventIds).orderBy('eventDate', 'asc') : []
+    const eventById = new Map(events.map((e) => [e.id, e]))
+
+    const breakdown = rows
+      .map((r) => {
+        const event = eventById.get(r.eventId)
+        if (!event) return null
+        return {
+          eventId: event.id,
+          eventTitle: event.title,
+          serviceId: event.serviceId,
+          count: Number(r.$extras.total),
+        }
+      })
+      .filter((r): r is NonNullable<typeof r> => r !== null)
+
+    const count = breakdown.reduce((sum, r) => sum + r.count, 0)
+
+    return ctx.response.send({ data: { count, events: breakdown } })
   }
 
   /**
