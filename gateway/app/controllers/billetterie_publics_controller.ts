@@ -1,9 +1,20 @@
 import type { HttpContext } from '@adonisjs/core/http'
 import env from '#start/env'
 import { proxyRequest } from '#services/proxy_service'
+import { orgIdValidator } from '#validators/org_id'
 
 const base = () => env.get('SVC_BILLETTERIE_BASE_URL')
 const authBase = () => env.get('SVC_AUTH_BASE_URL')
+
+async function orgIdFromQuery(ctx: HttpContext): Promise<string> {
+  const { orgId } = await orgIdValidator.validate({ orgId: ctx.request.qs().orgId })
+  return String(orgId)
+}
+
+async function orgIdFromBody(ctx: HttpContext): Promise<string> {
+  const { orgId } = await orgIdValidator.validate({ orgId: ctx.request.input('orgId') })
+  return String(orgId)
+}
 
 export default class BilletteriePublicsController {
   async serviceLookup(ctx: HttpContext) {
@@ -13,7 +24,7 @@ export default class BilletteriePublicsController {
   }
 
   async otpRequest(ctx: HttpContext) {
-    const orgId = String(ctx.request.input('orgId'))
+    const orgId = await orgIdFromBody(ctx)
     await proxyRequest(ctx, {
       targetUrl: `${base()}/otp/request`,
       jwt: { orgId, scope: 'billetterie', aud: 'svc-billetterie' },
@@ -21,7 +32,7 @@ export default class BilletteriePublicsController {
   }
 
   async otpVerify(ctx: HttpContext) {
-    const orgId = String(ctx.request.input('orgId'))
+    const orgId = await orgIdFromBody(ctx)
     await proxyRequest(ctx, {
       targetUrl: `${base()}/otp/verify`,
       jwt: { orgId, scope: 'billetterie', aud: 'svc-billetterie' },
@@ -29,7 +40,7 @@ export default class BilletteriePublicsController {
   }
 
   async tariffs(ctx: HttpContext) {
-    const orgId = String(ctx.request.qs().orgId)
+    const orgId = await orgIdFromQuery(ctx)
     await proxyRequest(ctx, {
       targetUrl: `${base()}/tariffs`,
       jwt: { orgId, scope: 'billetterie', aud: 'svc-billetterie' },
@@ -38,7 +49,7 @@ export default class BilletteriePublicsController {
   }
 
   async createOrder(ctx: HttpContext) {
-    const orgId = String(ctx.request.input('orgId'))
+    const orgId = await orgIdFromBody(ctx)
     await proxyRequest(ctx, {
       targetUrl: `${base()}/orders`,
       jwt: { orgId, scope: 'billetterie', aud: 'svc-billetterie' },
@@ -46,7 +57,7 @@ export default class BilletteriePublicsController {
   }
 
   async orderTickets(ctx: HttpContext) {
-    const orgId = String(ctx.request.qs().orgId)
+    const orgId = await orgIdFromQuery(ctx)
     await proxyRequest(ctx, {
       targetUrl: `${base()}/orders/${ctx.params.id}/tickets`,
       jwt: { orgId, scope: 'billetterie', aud: 'svc-billetterie' },
@@ -59,7 +70,7 @@ export default class BilletteriePublicsController {
    * même l'orgId au départ — voir paiement/status pour la première étape.
    */
   async orderTicketsByReference(ctx: HttpContext) {
-    const orgId = String(ctx.request.qs().orgId)
+    const orgId = await orgIdFromQuery(ctx)
     await proxyRequest(ctx, {
       targetUrl: `${base()}/orders/by-reference/${ctx.params.reference}/tickets`,
       jwt: { orgId, scope: 'billetterie', aud: 'svc-billetterie' },
@@ -68,7 +79,7 @@ export default class BilletteriePublicsController {
   }
 
   async ticketPdf(ctx: HttpContext) {
-    const orgId = String(ctx.request.qs().orgId)
+    const orgId = await orgIdFromQuery(ctx)
     await proxyRequest(ctx, {
       targetUrl: `${base()}/orders/${ctx.params.id}/tickets/${ctx.params.ticketId}/pdf`,
       jwt: { orgId, scope: 'billetterie', aud: 'svc-billetterie' },
@@ -78,7 +89,7 @@ export default class BilletteriePublicsController {
   }
 
   async ticketPdfByReference(ctx: HttpContext) {
-    const orgId = String(ctx.request.qs().orgId)
+    const orgId = await orgIdFromQuery(ctx)
     await proxyRequest(ctx, {
       targetUrl: `${base()}/orders/by-reference/${ctx.params.reference}/tickets/${ctx.params.ticketId}/pdf`,
       jwt: { orgId, scope: 'billetterie', aud: 'svc-billetterie' },
@@ -89,7 +100,7 @@ export default class BilletteriePublicsController {
 
   /** Tous les billets d'une commande fusionnés en un seul PDF. */
   async ticketsPdf(ctx: HttpContext) {
-    const orgId = String(ctx.request.qs().orgId)
+    const orgId = await orgIdFromQuery(ctx)
     await proxyRequest(ctx, {
       targetUrl: `${base()}/orders/${ctx.params.id}/tickets/pdf`,
       jwt: { orgId, scope: 'billetterie', aud: 'svc-billetterie' },
@@ -99,7 +110,7 @@ export default class BilletteriePublicsController {
   }
 
   async ticketsPdfByReference(ctx: HttpContext) {
-    const orgId = String(ctx.request.qs().orgId)
+    const orgId = await orgIdFromQuery(ctx)
     await proxyRequest(ctx, {
       targetUrl: `${base()}/orders/by-reference/${ctx.params.reference}/tickets/pdf`,
       jwt: { orgId, scope: 'billetterie', aud: 'svc-billetterie' },
@@ -114,7 +125,7 @@ export default class BilletteriePublicsController {
    * (retour PayFiP), pas d'orgId authentifié.
    */
   async retryOrderPayment(ctx: HttpContext) {
-    const orgId = String(ctx.request.qs().orgId)
+    const orgId = await orgIdFromQuery(ctx)
     await proxyRequest(ctx, {
       targetUrl: `${base()}/orders/by-reference/${ctx.params.reference}/retry-payment`,
       jwt: { orgId, scope: 'billetterie', aud: 'svc-billetterie' },

@@ -60,7 +60,9 @@ router.get('/services/:id/cover', [ServicesPublicsController, 'cover'])
 
 router.post('/paiement/payfip/notify', [PaiementPublicsController, 'notify'])
 router.route('/paiement/payfip/return', ['GET', 'POST'], [PaiementPublicsController, 'returnCallback'])
-router.get('/paiement/status/:idop', [PaiementPublicsController, 'status'])
+router
+  .get('/paiement/status/:idop', [PaiementPublicsController, 'status'])
+  .use(middleware.publicProofRateLimit())
 
 router.get('/billetterie/services/lookup/:slug', [
   BilletteriePublicsController,

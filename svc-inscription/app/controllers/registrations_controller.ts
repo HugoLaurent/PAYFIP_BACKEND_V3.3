@@ -1141,8 +1141,11 @@ export default class RegistrationsController {
       .first()
     if (!document) return ctx.response.status(404).send({ error: 'document_not_found' })
 
+    // document.filename vient de file.clientName, fourni par le citoyen à
+    // l'upload — jamais injecté tel quel dans un paramètre de header quoté.
+    const safeFilename = document.filename.replace(/["\\]/g, '_').replace(/[\r\n]/g, '')
     ctx.response.header('Content-Type', document.mimeType)
-    ctx.response.header('Content-Disposition', `inline; filename="${document.filename}"`)
+    ctx.response.header('Content-Disposition', `inline; filename="${safeFilename}"`)
     return ctx.response.send(document.fileData)
   }
 }

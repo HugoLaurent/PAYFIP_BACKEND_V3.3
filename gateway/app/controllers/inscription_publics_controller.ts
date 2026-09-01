@@ -1,9 +1,20 @@
 import type { HttpContext } from '@adonisjs/core/http'
 import env from '#start/env'
 import { proxyRequest, proxyMultipartUpload } from '#services/proxy_service'
+import { orgIdValidator } from '#validators/org_id'
 
 const base = () => env.get('SVC_INSCRIPTION_BASE_URL')
 const authBase = () => env.get('SVC_AUTH_BASE_URL')
+
+async function orgIdFromQuery(ctx: HttpContext): Promise<string> {
+  const { orgId } = await orgIdValidator.validate({ orgId: ctx.request.qs().orgId })
+  return String(orgId)
+}
+
+async function orgIdFromBody(ctx: HttpContext): Promise<string> {
+  const { orgId } = await orgIdValidator.validate({ orgId: ctx.request.input('orgId') })
+  return String(orgId)
+}
 
 export default class InscriptionPublicsController {
   async serviceLookup(ctx: HttpContext) {
@@ -13,7 +24,7 @@ export default class InscriptionPublicsController {
   }
 
   async otpRequest(ctx: HttpContext) {
-    const orgId = String(ctx.request.input('orgId'))
+    const orgId = await orgIdFromBody(ctx)
     await proxyRequest(ctx, {
       targetUrl: `${base()}/otp/request`,
       jwt: { orgId, scope: 'inscription', aud: 'svc-inscription' },
@@ -21,7 +32,7 @@ export default class InscriptionPublicsController {
   }
 
   async otpVerify(ctx: HttpContext) {
-    const orgId = String(ctx.request.input('orgId'))
+    const orgId = await orgIdFromBody(ctx)
     await proxyRequest(ctx, {
       targetUrl: `${base()}/otp/verify`,
       jwt: { orgId, scope: 'inscription', aud: 'svc-inscription' },
@@ -29,7 +40,7 @@ export default class InscriptionPublicsController {
   }
 
   async listEvents(ctx: HttpContext) {
-    const orgId = String(ctx.request.qs().orgId)
+    const orgId = await orgIdFromQuery(ctx)
     await proxyRequest(ctx, {
       targetUrl: `${base()}/events`,
       jwt: { orgId, scope: 'inscription', aud: 'svc-inscription' },
@@ -38,7 +49,7 @@ export default class InscriptionPublicsController {
   }
 
   async showEventBySlug(ctx: HttpContext) {
-    const orgId = String(ctx.request.qs().orgId)
+    const orgId = await orgIdFromQuery(ctx)
     await proxyRequest(ctx, {
       targetUrl: `${base()}/events/by-slug/${ctx.params.slug}`,
       jwt: { orgId, scope: 'inscription', aud: 'svc-inscription' },
@@ -47,7 +58,7 @@ export default class InscriptionPublicsController {
   }
 
   async showEvent(ctx: HttpContext) {
-    const orgId = String(ctx.request.qs().orgId)
+    const orgId = await orgIdFromQuery(ctx)
     await proxyRequest(ctx, {
       targetUrl: `${base()}/events/${ctx.params.id}`,
       jwt: { orgId, scope: 'inscription', aud: 'svc-inscription' },
@@ -56,7 +67,7 @@ export default class InscriptionPublicsController {
   }
 
   async createRegistration(ctx: HttpContext) {
-    const orgId = String(ctx.request.input('orgId'))
+    const orgId = await orgIdFromBody(ctx)
     await proxyRequest(ctx, {
       targetUrl: `${base()}/registrations`,
       jwt: { orgId, scope: 'inscription', aud: 'svc-inscription' },
@@ -70,7 +81,7 @@ export default class InscriptionPublicsController {
    * proxyRequest ne relaie que du JSON).
    */
   async createRegistrationWithDocuments(ctx: HttpContext) {
-    const orgId = String(ctx.request.input('orgId'))
+    const orgId = await orgIdFromBody(ctx)
     await proxyMultipartUpload(ctx, {
       targetUrl: `${base()}/registrations/with-documents`,
       jwt: { orgId, scope: 'inscription', aud: 'svc-inscription' },
@@ -86,7 +97,7 @@ export default class InscriptionPublicsController {
    * billetterie).
    */
   async registrationByReference(ctx: HttpContext) {
-    const orgId = String(ctx.request.qs().orgId)
+    const orgId = await orgIdFromQuery(ctx)
     await proxyRequest(ctx, {
       targetUrl: `${base()}/registrations/by-reference/${ctx.params.reference}`,
       jwt: { orgId, scope: 'inscription', aud: 'svc-inscription' },
@@ -95,7 +106,7 @@ export default class InscriptionPublicsController {
   }
 
   async registrationByToken(ctx: HttpContext) {
-    const orgId = String(ctx.request.qs().orgId)
+    const orgId = await orgIdFromQuery(ctx)
     await proxyRequest(ctx, {
       targetUrl: `${base()}/registrations/by-token/${ctx.params.accessToken}`,
       jwt: { orgId, scope: 'inscription', aud: 'svc-inscription' },
@@ -105,7 +116,7 @@ export default class InscriptionPublicsController {
 
   /** Re-dépôt de justificatifs après rejet — même contrainte multipart que le dépôt initial. */
   async replaceRegistrationDocuments(ctx: HttpContext) {
-    const orgId = String(ctx.request.input('orgId'))
+    const orgId = await orgIdFromBody(ctx)
     await proxyMultipartUpload(ctx, {
       targetUrl: `${base()}/registrations/by-token/${ctx.params.accessToken}/documents`,
       jwt: { orgId, scope: 'inscription', aud: 'svc-inscription' },
@@ -116,7 +127,7 @@ export default class InscriptionPublicsController {
   }
 
   async cancelRegistration(ctx: HttpContext) {
-    const orgId = String(ctx.request.input('orgId'))
+    const orgId = await orgIdFromBody(ctx)
     await proxyRequest(ctx, {
       targetUrl: `${base()}/registrations/by-token/${ctx.params.accessToken}/cancel`,
       jwt: { orgId, scope: 'inscription', aud: 'svc-inscription' },
@@ -124,7 +135,7 @@ export default class InscriptionPublicsController {
   }
 
   async payRegistration(ctx: HttpContext) {
-    const orgId = String(ctx.request.input('orgId'))
+    const orgId = await orgIdFromBody(ctx)
     await proxyRequest(ctx, {
       targetUrl: `${base()}/registrations/by-token/${ctx.params.accessToken}/pay`,
       jwt: { orgId, scope: 'inscription', aud: 'svc-inscription' },
@@ -132,7 +143,7 @@ export default class InscriptionPublicsController {
   }
 
   async retryRegistrationPayment(ctx: HttpContext) {
-    const orgId = String(ctx.request.input('orgId'))
+    const orgId = await orgIdFromBody(ctx)
     await proxyRequest(ctx, {
       targetUrl: `${base()}/registrations/by-token/${ctx.params.accessToken}/retry-payment`,
       jwt: { orgId, scope: 'inscription', aud: 'svc-inscription' },
@@ -140,7 +151,7 @@ export default class InscriptionPublicsController {
   }
 
   async downloadAttestation(ctx: HttpContext) {
-    const orgId = String(ctx.request.qs().orgId)
+    const orgId = await orgIdFromQuery(ctx)
     await proxyRequest(ctx, {
       targetUrl: `${base()}/registrations/by-token/${ctx.params.accessToken}/attestation`,
       jwt: { orgId, scope: 'inscription', aud: 'svc-inscription' },
