@@ -411,6 +411,9 @@ export default class RegistrationsController {
       }
       const original = await readFile(file.tmpPath!)
       const processed = await processDocument(original, mimeType)
+      if (!processed) {
+        return { ok: false, status: 422, body: { error: 'invalid_document', detail: 'unsupported_type' } }
+      }
       documents.push({ key: req.key, filename: file.clientName, mimeType: processed.mimeType, data: processed.data })
     }
 
