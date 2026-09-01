@@ -27,6 +27,12 @@ dist
 .env.production.local
 .env.development.local
 .secrets-local/
+bruno-aregie/
+
+# Notes et scripts de session, pas du code du projet
+CONTEXT_HANDOFF.md
+scratch/
+.claude/
 
 # Frontend assets compilés
 **/public/assets
