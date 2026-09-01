@@ -134,9 +134,9 @@ export default class EventsController {
         .orderBy('createdAt', 'desc')
 
       // Nombre d'inscriptions en attente de vérification par évènement —
-      // seul indicateur visuel côté agent qu'une action est requise avant
-      // l'email (voir registration_mail_service.ts#notifyAgentsOfPendingReview),
-      // pour qu'il n'ait pas à ouvrir chaque évènement pour le découvrir.
+      // seul indicateur (avec la cloche de notification) qu'une action est
+      // requise, pour qu'il n'ait pas à ouvrir chaque évènement pour le
+      // découvrir.
       const eventIds = events.map((e) => e.id)
       const pendingRows =
         eventIds.length > 0
