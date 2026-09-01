@@ -550,7 +550,13 @@ export default class RegistrationsController {
         serviceId: registration.serviceId,
         sourceReference: registration.paymentReference!,
         amountCents: registration.priceCentsAtRegistration,
-        objectLabel: `Inscription ${event.title}`,
+        // OBJET générique, jamais le titre de l'évènement : l'OBJET PayFiP
+        // peut finir sur le relevé bancaire du payeur (visible par
+        // d'autres que lui) et surtout, non borné, un titre trop long fait
+        // échouer PayFiP ("erreur fonctionnelle O1 : la valeur de l'OBJET
+        // est incorrecte") — même principe que svc-factures/svc-billetterie,
+        // qui envoient déjà un libellé court et fixe.
+        objectLabel: 'Inscription',
         payerEmail: registration.email,
         frontRedirectUrl: input.frontRedirectUrl,
       })
@@ -759,7 +765,13 @@ export default class RegistrationsController {
         serviceId: registration.serviceId,
         sourceReference: registration.paymentReference!,
         amountCents: registration.priceCentsAtRegistration,
-        objectLabel: `Inscription ${event.title}`,
+        // OBJET générique, jamais le titre de l'évènement : l'OBJET PayFiP
+        // peut finir sur le relevé bancaire du payeur (visible par
+        // d'autres que lui) et surtout, non borné, un titre trop long fait
+        // échouer PayFiP ("erreur fonctionnelle O1 : la valeur de l'OBJET
+        // est incorrecte") — même principe que svc-factures/svc-billetterie,
+        // qui envoient déjà un libellé court et fixe.
+        objectLabel: 'Inscription',
         payerEmail: registration.email,
         frontRedirectUrl: payload.frontRedirectUrl,
       })
@@ -793,7 +805,7 @@ export default class RegistrationsController {
   async retryPayment(ctx: HttpContext) {
     const found = await findRegistrationByAccessToken(ctx.internalAuth.orgId, ctx.params.accessToken)
     if (!found) return ctx.response.status(404).send({ error: 'registration_not_found' })
-    const { registration, event } = found
+    const { registration } = found
 
     if (registration.status !== 'cancelled' || !registration.payfipIdOp) {
       return ctx.response
@@ -810,7 +822,13 @@ export default class RegistrationsController {
         serviceId: registration.serviceId,
         sourceReference: registration.paymentReference!,
         amountCents: registration.priceCentsAtRegistration,
-        objectLabel: `Inscription ${event.title}`,
+        // OBJET générique, jamais le titre de l'évènement : l'OBJET PayFiP
+        // peut finir sur le relevé bancaire du payeur (visible par
+        // d'autres que lui) et surtout, non borné, un titre trop long fait
+        // échouer PayFiP ("erreur fonctionnelle O1 : la valeur de l'OBJET
+        // est incorrecte") — même principe que svc-factures/svc-billetterie,
+        // qui envoient déjà un libellé court et fixe.
+        objectLabel: 'Inscription',
         payerEmail: registration.email,
         frontRedirectUrl: payload.frontRedirectUrl,
       })
