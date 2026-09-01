@@ -1,5 +1,5 @@
 import { BaseSchema } from '@adonisjs/lucid/schema'
-import { SERVICE_TYPES, SERVICE_STATUSES, SAISIE_MODES } from '#database/enums'
+import { SERVICE_STATUSES, SAISIE_MODES } from '#database/enums'
 
 export default class extends BaseSchema {
   protected tableName = 'services'
@@ -18,7 +18,10 @@ export default class extends BaseSchema {
         .index()
 
       table.string('name').notNullable()
-      table.enum('service_type', [...SERVICE_TYPES]).notNullable()
+      // string ordinaire, pas de CHECK Postgres : validé uniquement côté
+      // TS (SERVICE_TYPES + validators/service.ts) pour qu'un futur type
+      // de service n'exige plus jamais de migration.
+      table.string('service_type').notNullable()
       table.enum('status', [...SERVICE_STATUSES]).notNullable().defaultTo('draft')
 
       table.string('numcli', 6).nullable()

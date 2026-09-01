@@ -1,5 +1,5 @@
 import { BaseSchema } from '@adonisjs/lucid/schema'
-import { SOURCE_SERVICES, PAYMENT_REQUEST_STATUSES } from '#database/enums'
+import { PAYMENT_REQUEST_STATUSES } from '#database/enums'
 
 export default class extends BaseSchema {
   protected tableName = 'payment_requests'
@@ -9,7 +9,10 @@ export default class extends BaseSchema {
       table.increments('id')
 
       table.string('org_id').notNullable()
-      table.enum('source_service', [...SOURCE_SERVICES]).notNullable()
+      // string ordinaire, pas de CHECK Postgres : validé uniquement côté
+      // TS (SOURCE_SERVICES) pour qu'un futur service source n'exige plus
+      // jamais de migration.
+      table.string('source_service').notNullable()
       table.string('source_reference').notNullable()
 
       table.integer('service_id').nullable().index()
