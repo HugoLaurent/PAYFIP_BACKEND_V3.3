@@ -4,14 +4,18 @@ import Event from '#models/event'
 import { runOnTenant } from '#services/tenant_connection_service'
 
 // orgId/serviceId doivent correspondre au seed svc-auth (demo_seeder.ts, org
-// "AREGIE Demo Mixte", service "Inscriptions Formations"). Jamais destiné à
-// tourner ailleurs qu'en dev/démo. Event vit dans la base tenant du service
-// (voir tenant_base_model.ts) : toute écriture doit passer par
-// runOnTenant(), jamais un firstOrCreate/updateOrCreate nu — oubli présent
-// dans une version antérieure de ce fichier, qui aurait levé
+// "AREGIE Demo Mixte", service "Inscriptions Formations") — mais ces id
+// dépendent de l'historique de la base (autoincrement), jamais garantis
+// identiques entre deux environnements (constaté : 1/6 en local, 2/7 sur le
+// VPS de démo à cause de lignes déjà existantes). Surchargeables par env
+// plutôt que de figer une valeur qui ne vaut que pour un seul déploiement.
+// Jamais destiné à tourner ailleurs qu'en dev/démo. Event vit dans la base
+// tenant du service (voir tenant_base_model.ts) : toute écriture doit passer
+// par runOnTenant(), jamais un firstOrCreate/updateOrCreate nu — oubli
+// présent dans une version antérieure de ce fichier, qui aurait levé
 // tenant_connection_not_set au premier lancement réel.
-const ORG_ID = 1
-const SERVICE_ID = 6
+const ORG_ID = Number(process.env.DEMO_SEED_ORG_ID ?? 1)
+const SERVICE_ID = Number(process.env.DEMO_SEED_SERVICE_ID ?? 6)
 
 export default class extends BaseSeeder {
   async run() {

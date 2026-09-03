@@ -4,11 +4,15 @@ import { runOnTenant } from '#services/tenant_connection_service'
 
 // orgId/serviceId doivent correspondre au seed svc-auth (demo_seeder.ts,
 // org "AREGIE Demo Mixte", service "Facturation Hôpital", slug
-// facturation-hopital) — jamais destiné à tourner ailleurs qu'en dev/démo.
-// Invoice vit dans la base tenant du service (voir tenant_base_model.ts) :
-// toute écriture doit passer par runOnTenant(), jamais un firstOrCreate nu.
-const ORG_ID = 1
-const SERVICE_ID = 3
+// facturation-hopital) — mais ces id dépendent de l'historique de la base
+// (autoincrement), jamais garantis identiques entre deux environnements.
+// Surchargeables par env plutôt que de figer une valeur qui ne vaut que
+// pour un seul déploiement. Jamais destiné à tourner ailleurs qu'en
+// dev/démo. Invoice vit dans la base tenant du service (voir
+// tenant_base_model.ts) : toute écriture doit passer par runOnTenant(),
+// jamais un firstOrCreate nu.
+const ORG_ID = Number(process.env.DEMO_SEED_ORG_ID ?? 1)
+const SERVICE_ID = Number(process.env.DEMO_SEED_SERVICE_ID ?? 3)
 
 export default class extends BaseSeeder {
   async run() {
