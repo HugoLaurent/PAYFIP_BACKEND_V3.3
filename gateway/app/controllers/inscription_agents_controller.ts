@@ -50,6 +50,7 @@ export default class InscriptionAgentsController {
         serviceIds: services.map((s) => s.id),
         aud: 'svc-inscription',
       },
+      forwardQueryString: true,
     })
   }
 
@@ -66,6 +67,7 @@ export default class InscriptionAgentsController {
         serviceIds: services.map((s) => s.id),
         aud: 'svc-inscription',
       },
+      forwardQueryString: true,
     })
   }
 
@@ -82,6 +84,7 @@ export default class InscriptionAgentsController {
         serviceIds: services.map((s) => s.id),
         aud: 'svc-inscription',
       },
+      forwardQueryString: true,
     })
   }
 
@@ -118,6 +121,7 @@ export default class InscriptionAgentsController {
         agentLastName: lastName,
         aud: 'svc-inscription',
       },
+      forwardQueryString: true,
     })
   }
 
@@ -134,6 +138,7 @@ export default class InscriptionAgentsController {
         aud: 'svc-inscription',
       },
       binary: true,
+      forwardQueryString: true,
     })
   }
 
@@ -150,6 +155,7 @@ export default class InscriptionAgentsController {
         serviceIds: services.map((s) => s.id),
         aud: 'svc-inscription',
       },
+      forwardQueryString: true,
     })
   }
 

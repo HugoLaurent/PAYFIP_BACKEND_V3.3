@@ -14,6 +14,16 @@ export default class EmailsController {
         { template: payload.template, to: payload.to },
         'emails: mode fake, email non envoyé'
       )
+      // Conservé (jamais réellement envoyé) pour la page de
+      // prévisualisation staff — voir StaffController#getEmail.
+      await EmailDelivery.create({
+        template: payload.template,
+        toEmail: payload.to,
+        data: payload.data,
+        attachments: payload.attachments ?? null,
+        status: 'fake',
+        attempts: 0,
+      })
       return ctx.response.send({ data: { sent: false, reason: 'fake_mode' } })
     }
 

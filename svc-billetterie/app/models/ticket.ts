@@ -1,13 +1,14 @@
 import { DateTime } from 'luxon'
-import { BaseModel, belongsTo, column, hasMany } from '@adonisjs/lucid/orm'
+import { belongsTo, column, hasMany } from '@adonisjs/lucid/orm'
 import type { BelongsTo, HasMany } from '@adonisjs/lucid/types/relations'
 import Order from '#models/order'
 import Scan from '#models/scan'
+import TenantBaseModel from '#models/tenant_base_model'
 import { TICKET_STATUSES } from '#database/enums'
 
 export type TicketStatus = (typeof TICKET_STATUSES)[number]
 
-export default class Ticket extends BaseModel {
+export default class Ticket extends TenantBaseModel {
   @column({ isPrimary: true })
   declare id: number
 

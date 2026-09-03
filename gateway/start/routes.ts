@@ -13,6 +13,7 @@ const FacturesPublicsController = () => import('#controllers/factures_publics_co
 const StaffController = () => import('#controllers/staff_controller')
 const StaffAuthController = () => import('#controllers/staff_auth_controller')
 const ServicesPublicsController = () => import('#controllers/services_publics_controller')
+const DemoController = () => import('#controllers/demo_controller')
 
 router.get('/health', () => {
   return { status: 'ok', service: 'gateway' }
@@ -20,6 +21,13 @@ router.get('/health', () => {
 
 router.get('/staff/auth/login', [StaffAuthController, 'login'])
 router.get('/staff/auth/callback', [StaffAuthController, 'callback'])
+
+// Mode démo — pas d'auth sur ces routes (c'est le but), chaque action de
+// DemoController 404 elle-même si DEMO_MODE n'est pas 'true'.
+router.get('/demo/status', [DemoController, 'status'])
+router.get('/demo/config', [DemoController, 'config'])
+router.post('/demo/admin-login', [DemoController, 'adminLogin'])
+router.get('/demo/example-email', [DemoController, 'exampleEmail'])
 
 router.post('/auth/login', [AuthController, 'login']).use(middleware.loginRateLimit())
 router.post('/auth/refresh', [AuthController, 'refresh']).use(middleware.clientAuth())
@@ -252,7 +260,14 @@ router
     router.get('/staff/users', [StaffController, 'listUsers'])
     router.get('/staff/orders', [StaffController, 'listOrders'])
     router.get('/staff/invoices', [StaffController, 'listInvoices'])
+    router.get('/staff/invoices/:id/payment-attempts', [StaffController, 'invoicePaymentAttempts'])
+    router.get('/staff/registrations', [StaffController, 'listRegistrations'])
+    router.get('/staff/registrations/:id/payment-attempts', [
+      StaffController,
+      'registrationPaymentAttempts',
+    ])
     router.get('/staff/payment-requests', [StaffController, 'listPaymentRequests'])
     router.get('/staff/emails', [StaffController, 'listEmails'])
+    router.get('/staff/emails/:id', [StaffController, 'getEmail'])
   })
   .use(middleware.staffAuth())

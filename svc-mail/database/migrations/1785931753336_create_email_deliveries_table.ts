@@ -1,5 +1,4 @@
 import { BaseSchema } from '@adonisjs/lucid/schema'
-import { EMAIL_DELIVERY_STATUSES } from '#database/enums'
 
 export default class extends BaseSchema {
   protected tableName = 'email_deliveries'
@@ -12,7 +11,11 @@ export default class extends BaseSchema {
       table.string('to_email').notNullable()
       table.text('data').notNullable()
 
-      table.enum('status', [...EMAIL_DELIVERY_STATUSES]).notNullable().defaultTo('pending')
+      // string ordinaire, pas table.enum() : une contrainte CHECK Postgres
+      // casserait dès qu'un nouveau statut (ex. 'fake') est ajouté sans
+      // migration ALTER dédiée — même correctif que service_type/
+      // source_service (commit 09acb42).
+      table.string('status').notNullable().defaultTo('pending')
       table.integer('attempts').notNullable().defaultTo(0)
       table.text('error').nullable()
       table.timestamp('next_retry_at').nullable()

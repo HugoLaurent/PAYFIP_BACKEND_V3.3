@@ -1,10 +1,11 @@
 import { DateTime } from 'luxon'
-import { BaseModel, column, scope } from '@adonisjs/lucid/orm'
+import { column, scope } from '@adonisjs/lucid/orm'
+import TenantBaseModel from '#models/tenant_base_model'
 import { TARIFF_STATUSES } from '#database/enums'
 
 export type TariffStatus = (typeof TARIFF_STATUSES)[number]
 
-export default class Tariff extends BaseModel {
+export default class Tariff extends TenantBaseModel {
   @column({ isPrimary: true })
   declare id: number
 

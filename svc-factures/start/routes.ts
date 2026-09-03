@@ -26,8 +26,9 @@ router
     router.post('/otp/request', [OtpsController, 'request'])
     router.post('/otp/verify', [OtpsController, 'verify'])
     router.get('/invoices/staff', [InvoicesController, 'staffIndex'])
+    router.get('/invoices/staff/:id/payment-attempts', [InvoicesController, 'paymentAttempts'])
     router.post('/invoices/verify', [InvoicesController, 'verify'])
-    router.post('/invoices/:id/pay', [InvoicesController, 'pay'])
+    router.post('/invoices/:code/pay', [InvoicesController, 'pay'])
     router.get('/invoices/by-reference/:reference', [InvoicesController, 'byReference'])
     router.post('/invoices/by-reference/:reference/retry-payment', [
       InvoicesController,

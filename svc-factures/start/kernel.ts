@@ -15,4 +15,5 @@ router.use([() => import('@adonisjs/core/bodyparser_middleware')])
 export const middleware = router.named({
   internalAuth: () => import('#middleware/internal_jwt_middleware'),
   aregieAuth: () => import('#middleware/aregie_auth_middleware'),
+  tenant: () => import('#middleware/tenant_middleware'),
 })

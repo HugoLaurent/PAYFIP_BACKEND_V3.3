@@ -26,7 +26,19 @@ export default class extends BaseSeeder {
       '006271',
       'piscine-municipale-b'
     )
-    const invoicing = await createService(orgMixte, 'Facturation Hôpital', 'factures', '006272')
+    // Même numcli que Piscine Municipale A / Inscriptions Formations —
+    // c'est le seul numcli réellement enrôlé côté PayFiP sandbox pour cet
+    // environnement de démo (confirmé en direct : un paiement billetterie
+    // avec 095548 aboutit, un paiement facture avec l'ancien 006272
+    // échouait en 500 côté svc-gestion). Sans lien avec le type de
+    // service — un numcli PayFiP identifie une régie, pas un type d'appli.
+    const invoicing = await createService(
+      orgMixte,
+      'Facturation Hôpital',
+      'factures',
+      '095548',
+      'facturation-hopital'
+    )
     const inscriptions = await createService(
       orgMixte,
       'Inscriptions Formations',
@@ -90,7 +102,10 @@ async function createService(
   numcli: string,
   slug: string | null = null
 ) {
-  return Service.firstOrCreate(
+  // updateOrCreate (pas firstOrCreate) : rejouable sur une base déjà
+  // seedée, pour backfiller un champ ajouté après coup (ex. le slug de
+  // "Facturation Hôpital", nécessaire pour le mode démo).
+  return Service.updateOrCreate(
     { orgId: org.id, name },
     { orgId: org.id, name, serviceType, status: 'active', numcli, saisieMode: 'T', slug }
   )

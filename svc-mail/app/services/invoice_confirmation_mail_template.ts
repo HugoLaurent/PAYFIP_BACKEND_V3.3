@@ -79,9 +79,9 @@ export function renderInvoiceConfirmationEmail(data: InvoiceConfirmationEmailDat
             </table>
           </td></tr>
 
-          <tr><td align="center" style="padding:24px 32px 0; font-size:13px; line-height:20px; color:#7b8189;">Votre paiement est enregistré. Il sera transmis à l'organisme. Conservez ce numéro de confirmation pour toute question.</td></tr>
+          <tr><td align="center" style="padding:24px 32px 28px; font-size:13px; line-height:20px; color:#7b8189;">Votre paiement est enregistré. Il sera transmis à l'organisme. Conservez ce numéro de confirmation pour toute question.</td></tr>
 
-          <tr><td align="right" style="padding:20px 32px; margin-top:24px; font-size:12px; line-height:19px; color:#7b8189;">${
+          <tr><td align="right" style="padding:24px 32px; background-color:#f2f5fb; border-top:1px solid #dee1e7; font-size:12px; line-height:19px; color:#7b8189;">${
             data.orgName || data.serviceName
               ? `Cet email vous est envoyé par <strong style="color:${MARINE};">${escapeHtml(data.orgName ?? data.serviceName!)}</strong>. Ne répondez pas à ce message.<br>`
               : 'Ne répondez pas à ce message.<br>'

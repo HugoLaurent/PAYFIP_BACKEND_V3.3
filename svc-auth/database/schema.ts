@@ -92,6 +92,39 @@ export class ServiceSchema extends BaseModel {
   declare updatedAt: DateTime
 }
 
+export class TenantDatabaseSchema extends BaseModel {
+  static $columns = ['appName', 'createdAt', 'dbHost', 'dbName', 'dbPasswordEnc', 'dbPort', 'dbUser', 'id', 'lastMigrationBatch', 'orgId', 'serviceId', 'serviceType', 'status', 'updatedAt'] as const
+  $columns = TenantDatabaseSchema.$columns
+  @column()
+  declare appName: string
+  @column.dateTime({ autoCreate: true })
+  declare createdAt: DateTime
+  @column()
+  declare dbHost: string
+  @column()
+  declare dbName: string
+  @column()
+  declare dbPasswordEnc: string
+  @column()
+  declare dbPort: number
+  @column()
+  declare dbUser: string
+  @column({ isPrimary: true })
+  declare id: number
+  @column()
+  declare lastMigrationBatch: number | null
+  @column()
+  declare orgId: number
+  @column()
+  declare serviceId: number
+  @column()
+  declare serviceType: string
+  @column()
+  declare status: string
+  @column.dateTime({ autoCreate: true, autoUpdate: true })
+  declare updatedAt: DateTime
+}
+
 export class UserPasswordHistorySchema extends BaseModel {
   static $columns = ['createdAt', 'id', 'passwordHash', 'userId'] as const
   $columns = UserPasswordHistorySchema.$columns

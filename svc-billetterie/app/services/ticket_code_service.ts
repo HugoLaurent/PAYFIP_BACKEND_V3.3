@@ -3,23 +3,44 @@ import env from '#start/env'
 
 const secret = env.get('TICKET_SIGNING_SECRET')
 
-function signature(ticketId: number): string {
-  return createHmac('sha256', secret).update(String(ticketId)).digest('hex').slice(0, 16)
+// Le serviceId est embarqué depuis le split par service (DB par
+// serviceId) : deux services différents ont chacun leur séquence d'id
+// repartant de 1, un ticketId seul ne suffit plus à router vers la bonne
+// base sans fan-out (voir order_code_service.ts, même raisonnement).
+function signature(serviceId: number, ticketId: number): string {
+  return createHmac('sha256', secret)
+    .update(`ticket:${serviceId}:${ticketId}`)
+    .digest('hex')
+    .slice(0, 16)
 }
 
-export function encodeTicketCode(ticketId: number): string {
-  return `${ticketId}.${signature(ticketId)}`
+export function encodeTicketCode(serviceId: number, ticketId: number): string {
+  return `${serviceId}.${ticketId}.${signature(serviceId, ticketId)}`
 }
 
-export function decodeTicketCode(code: string): number | null {
-  const [idPart, sigPart] = code.split('.')
-  const ticketId = Number(idPart)
+export interface DecodedTicketCode {
+  serviceId: number
+  ticketId: number
+}
 
-  if (!idPart || !sigPart || !Number.isInteger(ticketId) || ticketId <= 0) {
+export function decodeTicketCode(code: string): DecodedTicketCode | null {
+  const [serviceIdPart, ticketIdPart, sigPart] = code.split('.')
+  const serviceId = Number(serviceIdPart)
+  const ticketId = Number(ticketIdPart)
+
+  if (
+    !serviceIdPart ||
+    !ticketIdPart ||
+    !sigPart ||
+    !Number.isInteger(serviceId) ||
+    serviceId <= 0 ||
+    !Number.isInteger(ticketId) ||
+    ticketId <= 0
+  ) {
     return null
   }
 
-  const expected = signature(ticketId)
+  const expected = signature(serviceId, ticketId)
   const a = Buffer.from(sigPart)
   const b = Buffer.from(expected)
 
@@ -27,5 +48,5 @@ export function decodeTicketCode(code: string): number | null {
     return null
   }
 
-  return ticketId
+  return { serviceId, ticketId }
 }

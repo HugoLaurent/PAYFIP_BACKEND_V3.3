@@ -22,6 +22,10 @@ export default await Env.create(new URL('../', import.meta.url), {
   BILLETTERIE_JWT_PUBLIC_KEY: Env.schema.string(),
   INSCRIPTION_JWT_PUBLIC_KEY: Env.schema.string(),
 
+  // Clé symétrique (32 octets, base64) chiffrant les mots de passe DB
+  // stockés dans tenant_databases — voir tenant_credentials_service.ts.
+  TENANT_DB_CREDENTIALS_KEY: Env.schema.string(),
+
   // Suivi d'erreurs (GlitchTip, self-hosted, compatible Sentry) — absent en
   // dev/test, le SDK reste inerte plutôt que de faire échouer le démarrage.
   GLITCHTIP_DSN: Env.schema.string.optional(),

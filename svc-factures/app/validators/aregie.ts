@@ -25,6 +25,9 @@ export const depositInvoicesValidator = vine.compile(
 
 export const acknowledgeCollectionValidator = vine.compile(
   vine.object({
-    invoiceIds: vine.array(vine.number()).minLength(1),
+    // "<serviceId>:<invoiceId>" — l'id de facture seul n'est plus unique
+    // globalement depuis le split par service (chaque service a sa
+    // propre séquence d'id), voir pendingCollection().
+    invoiceIds: vine.array(vine.string().regex(/^\d+:\d+$/)).minLength(1),
   })
 )

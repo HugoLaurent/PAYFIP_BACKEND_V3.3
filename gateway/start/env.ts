@@ -41,4 +41,17 @@ export default await Env.create(new URL('../', import.meta.url), {
   SVC_FACTURES_BASE_URL: Env.schema.string({ format: 'url', tld: false }),
   SVC_MAIL_BASE_URL: Env.schema.string({ format: 'url', tld: false }),
   SVC_INSCRIPTION_BASE_URL: Env.schema.string({ format: 'url', tld: false }),
+
+  // Mode démo — widget de connexion rapide (staff/admin fictifs) pour les
+  // démos commerciales, désactivé par défaut. Voir demo_controller.ts :
+  // absent/'false' fait 404 toutes les routes /demo/*.
+  DEMO_MODE: Env.schema.boolean.optional(),
+  DEMO_ADMIN_EMAIL: Env.schema.string.optional(),
+  DEMO_ADMIN_PASSWORD: Env.schema.string.optional(),
+  DEMO_BILLETTERIE_PATH: Env.schema.string.optional(),
+  DEMO_INSCRIPTION_PATH: Env.schema.string.optional(),
+  DEMO_FACTURES_PATH: Env.schema.string.optional(),
+  DEMO_CITIZEN_EMAIL: Env.schema.string.optional(),
+  DEMO_CITIZEN_FIRST_NAME: Env.schema.string.optional(),
+  DEMO_CITIZEN_LAST_NAME: Env.schema.string.optional(),
 })

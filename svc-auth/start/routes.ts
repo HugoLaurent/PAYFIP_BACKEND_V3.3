@@ -11,6 +11,7 @@ const ProfileController = () => import('#controllers/profile_controller')
 const ServicesController = () => import('#controllers/services_controller')
 const OrganizationsController = () => import('#controllers/organizations_controller')
 const UsersController = () => import('#controllers/users_controller')
+const TenantDatabasesController = () => import('#controllers/tenant_databases_controller')
 
 router.get('/health', async (ctx) => {
   const report = await healthChecks.run()
@@ -35,6 +36,9 @@ router
     router.get('/services/:id/status', [ServicesController, 'status'])
     router.get('/services/:id/label', [ServicesController, 'label'])
     router.get('/services/by-numcli/:numcli', [ServicesController, 'byNumcli'])
+    router.get('/tenant-databases/:appName', [TenantDatabasesController, 'index'])
+    router.post('/tenant-databases', [TenantDatabasesController, 'store'])
+    router.patch('/tenant-databases/:id/status', [TenantDatabasesController, 'updateStatus'])
 
     router.get('/organizations', [OrganizationsController, 'index'])
     router.post('/organizations', [OrganizationsController, 'store'])

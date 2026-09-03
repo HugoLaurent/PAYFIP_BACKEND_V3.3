@@ -7,8 +7,22 @@ import { scanTicketValidator, listScansValidator } from '#validators/scan_ticket
 import { decodeTicketCode } from '#services/ticket_code_service'
 import { encodeOrderCode } from '#services/order_code_service'
 import { agentLabel } from '#services/agent_label_service'
+import {
+  runOnTenant,
+  ensureTenantConnectionsForOrg,
+  connectionNameFor,
+} from '#services/tenant_connection_service'
 
 export default class TicketsController {
+  /**
+   * POST /tickets/scan — le code embarque désormais le serviceId (voir
+   * ticket_code_service.ts) : routage direct dès que le code est
+   * déchiffrable. Quand il ne l'est pas (signature invalide) ou que le
+   * ticket est introuvable dans la base qu'il désigne, il n'y a
+   * structurellement aucun serviceId fiable à router — Scan reste sur la
+   * connexion app-locale précisément pour pouvoir tracer ces tentatives
+   * (QR forgé/périmé) sans base tenant à choisir.
+   */
   async scan(ctx: HttpContext) {
     const { code } = await ctx.request.validateUsing(scanTicketValidator)
     const { orgId, sub, role, servicePermissions, serviceIds } = ctx.internalAuth
@@ -19,16 +33,16 @@ export default class TicketsController {
     const agentId = Number(sub)
     const label = agentLabel(ctx.internalAuth)
 
-    const ticketId = decodeTicketCode(code)
+    const decoded = decodeTicketCode(code)
 
-    if (!ticketId) {
+    if (!decoded) {
       await logScan(null, null, Number(orgId), agentId, label, 'invalid_signature', 'code illisible ou forgé')
       return ctx.response.status(422).send({ result: 'invalid_signature' })
     }
 
-    const ticket = await Ticket.find(ticketId)
+    const ticket = await runOnTenant(decoded.serviceId, () => Ticket.find(decoded.ticketId))
 
-    if (!ticket || String(ticket.orgId) !== orgId) {
+    if (!ticket || ticket.serviceId !== decoded.serviceId || String(ticket.orgId) !== orgId) {
       await logScan(null, null, Number(orgId), agentId, label, 'not_found', null)
       return ctx.response.status(404).send({ result: 'not_found' })
     }
@@ -56,7 +70,7 @@ export default class TicketsController {
       return ctx.response.status(409).send({
         result: 'already_consumed',
         ticket: { id: ticket.id, tariffType: ticket.tariffType, visitDate: ticket.visitDate.toISODate() },
-        orderCode: encodeOrderCode(ticket.orderId),
+        orderCode: encodeOrderCode(ticket.serviceId, ticket.orderId),
         consumedAt: ticket.consumedAt?.toISO() ?? null,
         consumedByLabel: ticket.consumedByLabel,
       })
@@ -89,20 +103,23 @@ export default class TicketsController {
     // passer. Un seul UPDATE...WHERE...RETURNING gagne, quel que soit le
     // nombre d'appels concurrents (même pattern que resolvePayment côté
     // svc-gestion).
-    const rows = await db
-      .from('tickets')
-      .where('id', ticket.id)
-      .where('status', 'issued')
-      .update(
-        {
-          status: 'consumed',
-          consumed_at: DateTime.now().toSQL(),
-          consumed_by: agentId,
-          consumed_by_label: label,
-          updated_at: DateTime.now().toSQL(),
-        },
-        ['*']
-      )
+    const rows = await runOnTenant(decoded.serviceId, () =>
+      db
+        .connection(connectionNameFor(decoded.serviceId))
+        .from('tickets')
+        .where('id', ticket.id)
+        .where('status', 'issued')
+        .update(
+          {
+            status: 'consumed',
+            consumed_at: DateTime.now().toSQL(),
+            consumed_by: agentId,
+            consumed_by_label: label,
+            updated_at: DateTime.now().toSQL(),
+          },
+          ['*']
+        )
+    )
 
     if (rows.length === 0) {
       await logScan(ticket.id, ticket.serviceId, ticket.orgId, agentId, label, 'already_consumed', null)
@@ -125,15 +142,14 @@ export default class TicketsController {
       // même commande (famille/groupe) sans que l'agent ait besoin de
       // scanner un QR de commande séparé — même endpoint /orders/scan
       // que ce code alimente déjà.
-      orderCode: encodeOrderCode(ticket.orderId),
+      orderCode: encodeOrderCode(ticket.serviceId, ticket.orderId),
     })
   }
 
   /**
-   * POST /tickets/:id/reset-scan — remet un billet déjà scanné en
-   * "valide", pour une re-entrée légitime (le visiteur ressort chercher
-   * quelque chose et revient). Même droit que le scan lui-même : un
-   * agent qui peut scanner peut corriger son propre scan.
+   * POST /tickets/:id/reset-scan — l'id de billet seul ne dit pas quel
+   * service : fan-out borné à l'organisme (même périmètre qu'avant le
+   * split, qui filtrait par orgId seul).
    */
   async resetScan(ctx: HttpContext) {
     const { orgId, role, servicePermissions, serviceIds, sub } = ctx.internalAuth
@@ -144,10 +160,7 @@ export default class TicketsController {
     const agentId = Number(sub)
     const label = agentLabel(ctx.internalAuth)
 
-    const ticket = await Ticket.query()
-      .where('id', Number(ctx.params.id))
-      .where('orgId', orgId)
-      .first()
+    const ticket = await findTicketInOrg(Number(orgId), Number(ctx.params.id))
 
     if (!ticket) {
       return ctx.response.status(404).send({ error: 'ticket_not_found' })
@@ -165,17 +178,20 @@ export default class TicketsController {
       return ctx.response.status(409).send({ error: 'ticket_not_consumed' })
     }
 
-    await db
-      .from('tickets')
-      .where('id', ticket.id)
-      .where('status', 'consumed')
-      .update({
-        status: 'issued',
-        consumed_at: null,
-        consumed_by: null,
-        consumed_by_label: null,
-        updated_at: DateTime.now().toSQL(),
-      })
+    await runOnTenant(ticket.serviceId, () =>
+      db
+        .connection(connectionNameFor(ticket.serviceId))
+        .from('tickets')
+        .where('id', ticket.id)
+        .where('status', 'consumed')
+        .update({
+          status: 'issued',
+          consumed_at: null,
+          consumed_by: null,
+          consumed_by_label: null,
+          updated_at: DateTime.now().toSQL(),
+        })
+    )
 
     await logScan(ticket.id, ticket.serviceId, ticket.orgId, agentId, label, 'reset', null)
 
@@ -185,11 +201,11 @@ export default class TicketsController {
   }
 
   /**
-   * GET /scans — historique des scans (valides ou non) pour le service
-   * courant, le plus récent en premier. Sert deux usages : la liste
-   * courte "Derniers scans" sur l'écran Scanner (canScan suffit), et le
-   * vrai historique consultable par un admin/agent avec canViewHistory
-   * — qui a scanné, quand, et pourquoi un scan a été refusé.
+   * GET /scans — Scan reste sur la connexion app-locale (voir
+   * tenant_base_model.ts), donc pas de fan-out ici — inchangé, à part le
+   * preload('ticket', ...) qui traversait auparavant une seule base et
+   * doit maintenant faire un second aller vers la base tenant du service
+   * (déjà connu ici, un seul serviceId).
    */
   async index(ctx: HttpContext) {
     const { serviceId, dateFrom, dateTo, mine, page, perPage } =
@@ -204,7 +220,6 @@ export default class TicketsController {
     const query = Scan.query()
       .where('orgId', orgId)
       .where('serviceId', serviceId)
-      .preload('ticket', (q) => q.preload('order'))
       .orderBy('createdAt', 'desc')
 
     if (dateFrom) query.where('createdAt', '>=', dateFrom.toJSDate())
@@ -212,21 +227,52 @@ export default class TicketsController {
     if (mine && sub) query.where('agentId', Number(sub))
 
     const scans = await query.paginate(page ?? 1, perPage ?? 20)
+    const scanRows = scans.all()
+
+    const ticketIds = [...new Set(scanRows.map((s) => s.ticketId).filter((id): id is number => id !== null))]
+    const ticketsById = new Map<number, { tariffType: string; email: string | null; paymentReference: string | null }>()
+
+    if (ticketIds.length > 0) {
+      const tickets = await runOnTenant(serviceId, () =>
+        Ticket.query().whereIn('id', ticketIds).preload('order')
+      )
+      for (const t of tickets) {
+        ticketsById.set(t.id, {
+          tariffType: t.tariffType,
+          email: t.order?.email ?? null,
+          paymentReference: t.order?.paymentReference ?? null,
+        })
+      }
+    }
 
     return ctx.response.send({
-      data: scans.all().map((s) => ({
-        id: s.id,
-        result: s.result,
-        reason: s.reason,
-        agentLabel: s.agentLabel,
-        tariffType: s.ticket?.tariffType ?? null,
-        email: s.ticket?.order?.email ?? null,
-        paymentReference: s.ticket?.order?.paymentReference ?? null,
-        createdAt: s.createdAt.toISO(),
-      })),
+      data: scanRows.map((s) => {
+        const ticketInfo = s.ticketId ? ticketsById.get(s.ticketId) : undefined
+        return {
+          id: s.id,
+          result: s.result,
+          reason: s.reason,
+          agentLabel: s.agentLabel,
+          tariffType: ticketInfo?.tariffType ?? null,
+          email: ticketInfo?.email ?? null,
+          paymentReference: ticketInfo?.paymentReference ?? null,
+          createdAt: s.createdAt.toISO(),
+        }
+      }),
       meta: scans.getMeta(),
     })
   }
+}
+
+async function findTicketInOrg(orgId: number, ticketId: number): Promise<Ticket | null> {
+  const serviceIds = await ensureTenantConnectionsForOrg(orgId)
+  for (const serviceId of serviceIds) {
+    const ticket = await runOnTenant(serviceId, () =>
+      Ticket.query().where('id', ticketId).where('orgId', orgId).first()
+    )
+    if (ticket) return ticket
+  }
+  return null
 }
 
 async function logScan(

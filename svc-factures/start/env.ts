@@ -30,6 +30,13 @@ export default await Env.create(new URL('../', import.meta.url), {
 
   AREGIE_API_KEYS: Env.schema.string(),
 
+  // Signe le code opaque (serviceId+invoiceId) renvoyé par verify() et
+  // décodé par pay() — voir invoice_code_service.ts. L'id de facture ne
+  // peut plus servir de référence publique nue depuis le split par
+  // service : deux services différents ont chacun leur séquence d'id
+  // repartant de 1.
+  INVOICE_SIGNING_SECRET: Env.schema.string(),
+
   OTP_MODE: Env.schema.enum(['fake', 'real'] as const),
 
   // Filet de sécurité pour OTP_MODE=fake : une valeur banale ("true", "1")

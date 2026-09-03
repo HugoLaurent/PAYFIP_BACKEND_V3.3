@@ -32,7 +32,10 @@ export const listOrdersValidator = vine.compile(
 
 export const listOrdersStaffValidator = vine.compile(
   vine.object({
-    orgId: vine.number().positive().optional(),
+    // Obligatoire depuis le split par service (DB par serviceId) : sans
+    // orgId, staffIndex devrait faire un fan-out sur toutes les bases
+    // billetterie connues à chaque appel — voir tenant_connection_service.ts.
+    orgId: vine.number().positive(),
     serviceId: vine.number().positive().optional(),
     status: vine.enum(ORDER_STATUSES).optional(),
     q: vine.string().trim().minLength(1).optional(),

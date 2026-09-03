@@ -96,7 +96,7 @@ async function drawTicketPage(
   // Correction d'erreur haute : la pastille logo au centre du QR (26 pt,
   // ~5,8 % de sa surface) reste très en dessous du plafond ~20 % que
   // tolère le niveau H (~30 % de récupération).
-  const qrPng = await QRCode.toBuffer(encodeTicketCode(ticket.id), {
+  const qrPng = await QRCode.toBuffer(encodeTicketCode(ticket.serviceId, ticket.id), {
     errorCorrectionLevel: 'H',
     margin: 4,
     width: 432,

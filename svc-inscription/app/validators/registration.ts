@@ -9,6 +9,11 @@ import { REGISTRATION_STATUSES } from '#database/enums'
 // quel objet à clés dynamiques.
 export const createRegistrationValidator = vine.compile(
   vine.object({
+    // Nécessaire depuis le split par service (DB par serviceId) : sans
+    // lui, impossible de savoir quelle base interroger pour résoudre
+    // eventId. Le front le connaît déjà — il vient de la page évènement
+    // (showBySlug), qui l'exige aussi.
+    serviceId: vine.number().positive(),
     eventId: vine.number().positive(),
     email: vine.string().trim().email(),
     firstName: vine.string().trim().minLength(1),
@@ -60,3 +65,28 @@ export const payRegistrationValidator = vine.compile(
 )
 
 export const cancelRegistrationValidator = vine.compile(vine.object({}))
+
+// Obligatoire depuis le split par service (DB par serviceId) : sans
+// orgId, staffIndex devrait faire un fan-out sur toutes les bases
+// inscription connues à chaque appel — même raisonnement que
+// listInvoicesStaffValidator côté svc-factures.
+export const listRegistrationsStaffValidator = vine.compile(
+  vine.object({
+    orgId: vine.number().positive(),
+    serviceId: vine.number().positive().optional(),
+    status: vine.enum(REGISTRATION_STATUSES).optional(),
+    q: vine.string().trim().minLength(1).optional(),
+    dateFrom: vine.date({ formats: ['YYYY-MM-DD'] }).optional(),
+    dateTo: vine.date({ formats: ['YYYY-MM-DD'] }).optional(),
+    page: vine.number().positive().optional(),
+    perPage: vine.number().positive().max(100).optional(),
+  })
+)
+
+// Le staff connaît déjà le serviceId d'une inscription via staffIndex —
+// pas besoin de fan-out ici.
+export const paymentAttemptsQueryValidator = vine.compile(
+  vine.object({
+    serviceId: vine.number().positive(),
+  })
+)

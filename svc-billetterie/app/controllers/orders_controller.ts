@@ -7,6 +7,7 @@ import Order from '#models/order'
 import OrderLine from '#models/order_line'
 import Ticket from '#models/ticket'
 import Scan from '#models/scan'
+import OrderPaymentAttempt from '#models/order_payment_attempt'
 import {
   createOrderValidator,
   agentSaleValidator,
@@ -18,12 +19,7 @@ import {
 import { paymentWebhookValidator } from '#validators/payment_webhook'
 import { computeOrderTotals, UnknownTariffTypeError } from '#services/order_pricing_service'
 import { isEmailVerified } from '#services/otp_service'
-import {
-  createPaymentRequest,
-  retryPaymentRequest,
-  listPaymentAttempts,
-  SvcGestionError,
-} from '#services/svc_gestion_client'
+import { createPaymentRequest, retryPaymentRequest, SvcGestionError } from '#services/svc_gestion_client'
 import { fetchServiceStatus, isVisitDateInClosure, isVisitDateOpen } from '#services/svc_auth_client'
 import { agentLabel } from '#services/agent_label_service'
 import { generateTicketsForOrder } from '#services/ticket_generation_service'
@@ -31,6 +27,38 @@ import { encodeTicketCode } from '#services/ticket_code_service'
 import { decodeOrderCode, encodeOrderCode } from '#services/order_code_service'
 import { generateTicketPdf, generateOrderTicketsPdf } from '#services/ticket_pdf_service'
 import { sendTicketConfirmationEmail } from '#services/ticket_confirmation_mail_service'
+import {
+  runOnTenant,
+  ensureTenantConnectionsForOrg,
+  ensureTenantConnections,
+  tenantConnectionStorage,
+} from '#services/tenant_connection_service'
+
+// REFDET PayFiP : 6 à 30 caractères alphanumériques sans caractère
+// spécial. Le serviceId est embarqué dans la référence elle-même (largeur
+// fixe, donc parsable sans ambiguïté) pour que ticketsByReference()/
+// retryPayment()/paymentWebhook() routent directement vers la bonne base
+// tenant, sans jamais avoir à interroger tous les services d'un
+// organisme pour retrouver une commande (même raisonnement que le split
+// factures — deux services ont chacun leur séquence d'id repartant de 1,
+// un id de commande seul ne suffit plus à être unique globalement).
+const REFERENCE_SERVICE_ID_WIDTH = 6
+const REFERENCE_ORDER_ID_WIDTH = 8
+const PAYMENT_REFERENCE_RE = new RegExp(
+  `^BILL(\\d{${REFERENCE_SERVICE_ID_WIDTH}})(\\d{${REFERENCE_ORDER_ID_WIDTH}})$`
+)
+
+function buildPaymentReference(serviceId: number, orderId: number): string {
+  return `BILL${String(serviceId).padStart(REFERENCE_SERVICE_ID_WIDTH, '0')}${String(
+    orderId
+  ).padStart(REFERENCE_ORDER_ID_WIDTH, '0')}`
+}
+
+function parsePaymentReference(reference: string): { serviceId: number; orderId: number } | null {
+  const match = PAYMENT_REFERENCE_RE.exec(reference)
+  if (!match) return null
+  return { serviceId: Number(match[1]), orderId: Number(match[2]) }
+}
 
 function serializeTicket(ticket: Ticket) {
   return {
@@ -39,21 +67,18 @@ function serializeTicket(ticket: Ticket) {
     priceAtPurchaseCents: ticket.priceAtPurchaseCents,
     visitDate: ticket.visitDate.toISODate(),
     status: ticket.status,
-    code: encodeTicketCode(ticket.id),
+    code: encodeTicketCode(ticket.serviceId, ticket.id),
   }
 }
 
 export default class OrdersController {
   /**
    * GET /orders/stats — indicateurs du mois en cours, tous services
-   * billetterie confondus (jamais un appel par service : ça ne passerait
-   * pas à l'échelle pour un organisme avec beaucoup de services). Un
-   * admin voit tout l'organisme ; un agent seulement les services où il a
-   * canViewHistory. Alimente le Dashboard : totaux du mois, comparaison
-   * au mois précédent, sparkline 14 jours, top services et flux
-   * d'activité récente (le nom du service n'est pas résolu ici — le
-   * front le fait via son `auth.services` déjà en mémoire, pour éviter un
-   * aller-retour vers svc-auth à chaque affichage du tableau de bord).
+   * billetterie confondus. Un admin voit tout l'organisme (fan-out sur
+   * toutes les bases tenant de l'org) ; un agent seulement les services
+   * où il a canViewHistory (fan-out borné à ces services précis). Scan
+   * reste sur la connexion app-locale (voir tenant_base_model.ts) — sa
+   * partie de la requête ne change pas.
    */
   async stats(ctx: HttpContext) {
     const { orgId, role, servicePermissions, serviceIds } = ctx.internalAuth
@@ -78,43 +103,67 @@ export default class OrdersController {
       }
     }
 
+    const targetServiceIds = allowedServiceIds
+      ? await ensureTenantConnections(allowedServiceIds)
+      : await ensureTenantConnectionsForOrg(Number(orgId))
+
     const monthStart = DateTime.now().startOf('month')
     const prevMonthStart = monthStart.minus({ months: 1 })
     const sparklineStart = DateTime.now().minus({ days: 13 }).startOf('day')
-    // Le sparkline (14 derniers jours) peut chevaucher le mois précédent —
-    // une seule requête bornée à la plus ancienne des deux dates permet
-    // de dériver mois courant, mois précédent, top services et sparkline
-    // du même jeu de lignes plutôt que de répéter le scan de la table.
     const queryStart = sparklineStart < prevMonthStart ? sparklineStart : prevMonthStart
-
-    const ordersQuery = Order.query()
-      .where('orgId', orgId)
-      .where('status', 'confirmed')
-      .where('createdAt', '>=', queryStart.toJSDate())
-      .select('serviceId', 'totalAmountCents', 'qtyTickets', 'createdAt')
-    if (allowedServiceIds) ordersQuery.whereIn('serviceId', allowedServiceIds)
-    const orders = await ordersQuery
 
     let monthRevenueCents = 0
     let monthTicketsSold = 0
     let prevMonthRevenueCents = 0
+    let monthTicketsScanned = 0
     const byService = new Map<number, { revenueCents: number; ticketsSold: number }>()
     const dailyMap = new Map<string, number>()
+    const recentOrdersAll: Order[] = []
 
-    for (const o of orders) {
-      if (o.createdAt >= monthStart) {
-        monthRevenueCents += o.totalAmountCents
-        monthTicketsSold += o.qtyTickets
-        const entry = byService.get(o.serviceId) ?? { revenueCents: 0, ticketsSold: 0 }
-        entry.revenueCents += o.totalAmountCents
-        entry.ticketsSold += o.qtyTickets
-        byService.set(o.serviceId, entry)
-      } else if (o.createdAt >= prevMonthStart) {
-        prevMonthRevenueCents += o.totalAmountCents
-      }
-      if (o.createdAt >= sparklineStart) {
-        const key = o.createdAt.toFormat('yyyy-MM-dd')
-        dailyMap.set(key, (dailyMap.get(key) ?? 0) + o.totalAmountCents)
+    for (const serviceId of targetServiceIds) {
+      const { orders, scannedCount, recentOrders } = await runOnTenant(serviceId, async () => {
+        const orders = await Order.query()
+          .where('orgId', orgId)
+          .where('status', 'confirmed')
+          .where('createdAt', '>=', queryStart.toJSDate())
+          .select('serviceId', 'totalAmountCents', 'qtyTickets', 'createdAt')
+
+        const scanStats = await db
+          .from('tickets')
+          .where('org_id', orgId)
+          .where('service_id', serviceId)
+          .whereNotNull('consumed_at')
+          .where('consumed_at', '>=', monthStart.toSQL()!)
+          .count('* as total')
+          .first()
+
+        const recentOrders = await Order.query()
+          .where('orgId', orgId)
+          .where('status', 'confirmed')
+          .orderBy('createdAt', 'desc')
+          .limit(8)
+
+        return { orders, scannedCount: Number(scanStats?.total ?? 0), recentOrders }
+      })
+
+      monthTicketsScanned += scannedCount
+      recentOrdersAll.push(...recentOrders)
+
+      for (const o of orders) {
+        if (o.createdAt >= monthStart) {
+          monthRevenueCents += o.totalAmountCents
+          monthTicketsSold += o.qtyTickets
+          const entry = byService.get(o.serviceId) ?? { revenueCents: 0, ticketsSold: 0 }
+          entry.revenueCents += o.totalAmountCents
+          entry.ticketsSold += o.qtyTickets
+          byService.set(o.serviceId, entry)
+        } else if (o.createdAt >= prevMonthStart) {
+          prevMonthRevenueCents += o.totalAmountCents
+        }
+        if (o.createdAt >= sparklineStart) {
+          const key = o.createdAt.toFormat('yyyy-MM-dd')
+          dailyMap.set(key, (dailyMap.get(key) ?? 0) + o.totalAmountCents)
+        }
       }
     }
 
@@ -129,22 +178,6 @@ export default class OrdersController {
       return { date: key, revenueCents: dailyMap.get(key) ?? 0 }
     })
 
-    const scanQuery = db
-      .from('tickets')
-      .where('org_id', orgId)
-      .whereNotNull('consumed_at')
-      .where('consumed_at', '>=', monthStart.toSQL()!)
-    if (allowedServiceIds) scanQuery.whereIn('service_id', allowedServiceIds)
-    const scanStats = await scanQuery.count('* as total').first()
-
-    const recentOrdersQuery = Order.query()
-      .where('orgId', orgId)
-      .where('status', 'confirmed')
-      .orderBy('createdAt', 'desc')
-      .limit(8)
-    if (allowedServiceIds) recentOrdersQuery.whereIn('serviceId', allowedServiceIds)
-    const recentOrders = await recentOrdersQuery
-
     const recentScansQuery = Scan.query()
       .where('orgId', orgId)
       .where('result', 'valid')
@@ -154,15 +187,18 @@ export default class OrdersController {
     const recentScans = await recentScansQuery
 
     const recentActivity = [
-      ...recentOrders.map((o) => ({
-        type: 'order' as const,
-        serviceId: o.serviceId,
-        createdAt: o.createdAt.toISO(),
-        ticketCount: o.qtyTickets,
-        amountCents: o.totalAmountCents,
-        soldBy: o.soldBy,
-        paymentReference: o.paymentReference,
-      })),
+      ...recentOrdersAll
+        .sort((a, b) => b.createdAt.toMillis() - a.createdAt.toMillis())
+        .slice(0, 8)
+        .map((o) => ({
+          type: 'order' as const,
+          serviceId: o.serviceId,
+          createdAt: o.createdAt.toISO(),
+          ticketCount: o.qtyTickets,
+          amountCents: o.totalAmountCents,
+          soldBy: o.soldBy,
+          paymentReference: o.paymentReference,
+        })),
       ...recentScans.map((s) => ({
         type: 'scan' as const,
         serviceId: s.serviceId,
@@ -176,7 +212,7 @@ export default class OrdersController {
       data: {
         monthRevenueCents,
         monthTicketsSold,
-        monthTicketsScanned: Number(scanStats?.total ?? 0),
+        monthTicketsScanned,
         prevMonthRevenueCents,
         dailyRevenue,
         topServices,
@@ -194,64 +230,74 @@ export default class OrdersController {
       return ctx.response.status(403).send({ error: 'permission_required' })
     }
 
-    const query = Order.query()
-      .where('orgId', orgId)
-      .where('serviceId', serviceId)
-      .orderBy('createdAt', 'desc')
-      .preload('tickets')
+    return runOnTenant(serviceId, async () => {
+      const query = Order.query()
+        .where('orgId', orgId)
+        .where('serviceId', serviceId)
+        .orderBy('createdAt', 'desc')
+        .preload('tickets')
 
-    if (status) query.where('status', status)
-    if (q) {
-      query.where((sub) => {
-        sub.whereILike('paymentReference', `%${q}%`).orWhereILike('email', `%${q}%`)
-      })
-    }
-    if (dateFrom) query.where('createdAt', '>=', dateFrom.toJSDate())
-    if (dateTo) query.where('createdAt', '<=', dateTo.plus({ days: 1 }).toJSDate())
+      if (status) query.where('status', status)
+      if (q) {
+        query.where((sub) => {
+          sub.whereILike('paymentReference', `%${q}%`).orWhereILike('email', `%${q}%`)
+        })
+      }
+      if (dateFrom) query.where('createdAt', '>=', dateFrom.toJSDate())
+      if (dateTo) query.where('createdAt', '<=', dateTo.plus({ days: 1 }).toJSDate())
 
-    // Tronquer à 100 sans le dire au staff cachait qu'une liste plus
-    // longue existait — la pagination le rend explicite (meta.total).
-    const orders = await query.paginate(page ?? 1, perPage ?? 25)
+      // Tronquer à 100 sans le dire au staff cachait qu'une liste plus
+      // longue existait — la pagination le rend explicite (meta.total).
+      const orders = await query.paginate(page ?? 1, perPage ?? 25)
 
-    return ctx.response.send({
-      data: orders.all().map((order) => ({
-        id: order.id,
-        paymentReference: order.paymentReference,
-        createdAt: order.createdAt.toISO(),
-        visitDate: order.visitDate.toISODate(),
-        email: order.email,
-        qtyTickets: order.qtyTickets,
-        totalAmountCents: order.totalAmountCents,
-        status: order.status,
-        paymentMethod: order.paymentMethod,
-        soldBy: order.soldBy,
-        consumedCount: order.tickets.filter((t) => t.status === 'consumed').length,
-        retryCount: order.retryCount,
-        tickets: order.tickets.map((t) => ({
-          id: t.id,
-          tariffType: t.tariffType,
-          status: t.status,
-          consumedAt: t.consumedAt?.toISO() ?? null,
-          consumedByLabel: t.consumedByLabel,
+      return ctx.response.send({
+        data: orders.all().map((order) => ({
+          id: order.id,
+          paymentReference: order.paymentReference,
+          createdAt: order.createdAt.toISO(),
+          visitDate: order.visitDate.toISODate(),
+          email: order.email,
+          qtyTickets: order.qtyTickets,
+          totalAmountCents: order.totalAmountCents,
+          status: order.status,
+          paymentMethod: order.paymentMethod,
+          soldBy: order.soldBy,
+          consumedCount: order.tickets.filter((t) => t.status === 'consumed').length,
+          retryCount: order.retryCount,
+          tickets: order.tickets.map((t) => ({
+            id: t.id,
+            tariffType: t.tariffType,
+            status: t.status,
+            consumedAt: t.consumedAt?.toISO() ?? null,
+            consumedByLabel: t.consumedByLabel,
+          })),
         })),
-      })),
-      meta: orders.getMeta(),
+        meta: orders.getMeta(),
+      })
     })
   }
 
   /**
-   * GET /orders/:id/payment-attempts — détail des tentatives de paiement
-   * d'une commande (statuts + dates), pour qu'un agent puisse répondre à
-   * un client qui a payé plusieurs fois. Même droit que l'Historique lui-
-   * même (canViewHistory sur le service de CETTE commande).
+   * GET /orders/:id/payment-attempts — l'id de commande seul ne dit pas
+   * quel service (donc quelle base) — fan-out borné à l'organisme entier
+   * (pas seulement aux services de l'agent) : c'est le même périmètre que
+   * le comportement d'avant le split, où la recherche était par orgId
+   * seul, le droit d'en voir le détail étant vérifié APRÈS coup via
+   * canViewHistory sur le service réel de la commande trouvée.
+   *
+   * Lu depuis order_payment_attempts, jamais depuis svc-gestion : ce
+   * service n'a plus besoin de gestion pour afficher son propre
+   * historique de tentatives (voir échange du 2026-09-03). La contrepartie
+   * assumée : une session PayFiP simplement abandonnée par le citoyen
+   * (jamais de webhook, ni paid ni failed) reste affichée
+   * "awaiting_payment" indéfiniment ici, alors que svc-gestion la
+   * basculerait en "expired" après 15 min — gestion garde cette
+   * connaissance-là pour son propre dashboard staff, pas nous.
    */
   async paymentAttempts(ctx: HttpContext) {
     const { orgId, role, servicePermissions } = ctx.internalAuth
 
-    const order = await Order.query()
-      .where('id', Number(ctx.params.id))
-      .where('orgId', orgId)
-      .first()
+    const order = await findOrderInOrg(Number(orgId), Number(ctx.params.id))
 
     if (!order) {
       return ctx.response.status(404).send({ error: 'order_not_found' })
@@ -261,17 +307,26 @@ export default class OrdersController {
       return ctx.response.status(403).send({ error: 'permission_required' })
     }
 
-    if (!order.paymentReference) {
-      return ctx.response.send({ data: [] })
-    }
+    const attempts = await runOnTenant(order.serviceId, () =>
+      OrderPaymentAttempt.query().where('orderId', order.id).orderBy('createdAt', 'asc')
+    )
 
-    const attempts = await listPaymentAttempts(String(orgId), order.paymentReference)
-    return ctx.response.send({ data: attempts })
+    return ctx.response.send({
+      data: attempts.map((a) => ({
+        id: a.id,
+        status: a.status,
+        createdAt: a.createdAt.toISO(),
+        paidAt: a.paidAt?.toISO() ?? null,
+        isRetry: a.isRetry,
+      })),
+    })
   }
 
   /**
-   * GET /orders/staff — réservé au staff AREGIE : vue tous organismes
-   * pour le dashboard, avec filtres optionnels par organisme/service.
+   * GET /orders/staff — réservé au staff AREGIE : vue par organisme
+   * (orgId obligatoire depuis le split par service) pour le dashboard,
+   * filtrable par service. Fan-out borné aux services billetterie de cet
+   * organisme, fusion/tri/pagination en mémoire.
    */
   async staffIndex(ctx: HttpContext) {
     if (ctx.internalAuth.scope !== 'staff') {
@@ -281,22 +336,34 @@ export default class OrdersController {
     const { orgId, serviceId, status, q, dateFrom, dateTo, page, perPage } =
       await ctx.request.validateUsing(listOrdersStaffValidator)
 
-    const query = Order.query().orderBy('createdAt', 'desc')
-    if (orgId) query.where('orgId', orgId)
-    if (serviceId) query.where('serviceId', serviceId)
-    if (status) query.where('status', status)
-    if (q) {
-      query.where((sub) => {
-        sub.whereILike('paymentReference', `%${q}%`).orWhereILike('email', `%${q}%`)
-      })
-    }
-    if (dateFrom) query.where('createdAt', '>=', dateFrom.toJSDate())
-    if (dateTo) query.where('createdAt', '<=', dateTo.plus({ days: 1 }).toJSDate())
+    const candidateServiceIds = serviceId ? [serviceId] : await ensureTenantConnectionsForOrg(orgId)
 
-    const orders = await query.paginate(page ?? 1, perPage ?? 25)
+    const matches: Order[] = []
+    for (const sid of candidateServiceIds) {
+      const rows = await runOnTenant(sid, () => {
+        const query = Order.query().where('orgId', orgId).orderBy('createdAt', 'desc')
+        if (status) query.where('status', status)
+        if (q) {
+          query.where((sub) => {
+            sub.whereILike('paymentReference', `%${q}%`).orWhereILike('email', `%${q}%`)
+          })
+        }
+        if (dateFrom) query.where('createdAt', '>=', dateFrom.toJSDate())
+        if (dateTo) query.where('createdAt', '<=', dateTo.plus({ days: 1 }).toJSDate())
+        return query
+      })
+      matches.push(...rows)
+    }
+
+    matches.sort((a, b) => b.createdAt.toMillis() - a.createdAt.toMillis())
+
+    const perPageResolved = perPage ?? 25
+    const pageResolved = page ?? 1
+    const start = (pageResolved - 1) * perPageResolved
+    const pageItems = matches.slice(start, start + perPageResolved)
 
     return ctx.response.send({
-      data: orders.all().map((order) => ({
+      data: pageItems.map((order) => ({
         id: order.id,
         createdAt: order.createdAt.toISO(),
         orgId: order.orgId,
@@ -309,7 +376,12 @@ export default class OrdersController {
         paymentMethod: order.paymentMethod,
         paymentReference: order.paymentReference,
       })),
-      meta: orders.getMeta(),
+      meta: {
+        total: matches.length,
+        perPage: perPageResolved,
+        currentPage: pageResolved,
+        lastPage: Math.max(1, Math.ceil(matches.length / perPageResolved)),
+      },
     })
   }
 
@@ -332,11 +404,6 @@ export default class OrdersController {
     ) {
       return ctx.response.status(409).send({ error: 'service_closed' })
     }
-    // Jours hebdo fermés + périodes de fermeture ponctuelles (voir
-    // OpeningScheduleManager côté admin) : ni l'un ni l'autre ne ferme la
-    // page (déjà vérifié ci-dessus via isOpen — une fermeture FUTURE n'y
-    // apparaît pas encore), seulement la date de visite précise choisie
-    // ici, qui elle peut très bien tomber dedans.
     if (
       !isVisitDateOpen(serviceAvailability.openingDays, payload.visitDate) ||
       isVisitDateInClosure(serviceAvailability.closures, payload.visitDate)
@@ -344,108 +411,111 @@ export default class OrdersController {
       return ctx.response.status(422).send({ error: 'visit_date_closed' })
     }
 
-    let totals
-    try {
-      totals = await computeOrderTotals(Number(orgId), payload.serviceId, payload.tickets)
-    } catch (error) {
-      if (error instanceof UnknownTariffTypeError) {
-        return ctx.response.status(422).send({ error: 'unknown_tariff_type' })
+    return runOnTenant(payload.serviceId, async () => {
+      let totals
+      try {
+        totals = await computeOrderTotals(Number(orgId), payload.serviceId, payload.tickets)
+      } catch (error) {
+        if (error instanceof UnknownTariffTypeError) {
+          return ctx.response.status(422).send({ error: 'unknown_tariff_type' })
+        }
+        throw error
       }
-      throw error
-    }
 
-    const isFree = totals.totalAmountCents === 0
+      const isFree = totals.totalAmountCents === 0
+      const connectionName = tenantConnectionStorage.getStore()!
 
-    const { order, tickets } = await db.transaction(async (trx) => {
-      const newOrder = await Order.create(
-        {
-          orgId: Number(orgId),
-          serviceId: payload.serviceId,
-          email: payload.email,
-          visitDate: payload.visitDate,
-          qtyTickets: totals.qtyTickets,
-          totalAmountCents: totals.totalAmountCents,
-          // Gratuit : confirmée tout de suite, jamais de session PayFiP —
-          // il n'y a rien à payer. Payant : circuit habituel (draft en
-          // attendant l'ouverture de la session PayFiP juste après).
-          status: isFree ? 'confirmed' : 'draft',
-          paymentMethod: isFree ? 'free' : 'payfip',
-          otpVerifiedAt: DateTime.now(),
-          // Preuve de possession indépendante de payfip_id_op — une
-          // commande gratuite n'aura jamais de session PayFiP, donc jamais
-          // de payfip_id_op, mais doit quand même pouvoir donner accès à
-          // ses billets (page de retour, PDF) au même titre qu'une payante.
-          accessToken: randomUUID(),
-        },
-        { client: trx }
-      )
+      const { order, tickets } = await db.connection(connectionName).transaction(async (trx) => {
+        const newOrder = await Order.create(
+          {
+            orgId: Number(orgId),
+            serviceId: payload.serviceId,
+            email: payload.email,
+            visitDate: payload.visitDate,
+            qtyTickets: totals.qtyTickets,
+            totalAmountCents: totals.totalAmountCents,
+            status: isFree ? 'confirmed' : 'draft',
+            paymentMethod: isFree ? 'free' : 'payfip',
+            otpVerifiedAt: DateTime.now(),
+            accessToken: randomUUID(),
+          },
+          { client: trx }
+        )
 
-      await OrderLine.createMany(
-        totals.lines.map((line) => ({
-          orderId: newOrder.id,
-          tariffType: line.tariffType,
-          quantity: line.quantity,
-          unitPriceCents: line.unitPriceCents,
-        })),
-        { client: trx }
-      )
+        await OrderLine.createMany(
+          totals.lines.map((line) => ({
+            orderId: newOrder.id,
+            tariffType: line.tariffType,
+            quantity: line.quantity,
+            unitPriceCents: line.unitPriceCents,
+          })),
+          { client: trx }
+        )
 
-      newOrder.paymentReference = `BILL${String(newOrder.id).padStart(8, '0')}`
-      await newOrder.save()
+        newOrder.paymentReference = buildPaymentReference(payload.serviceId, newOrder.id)
+        await newOrder.save()
 
-      const newTickets = isFree ? await generateTicketsForOrder(newOrder, trx) : []
-      return { order: newOrder, tickets: newTickets }
-    })
+        const newTickets = isFree ? await generateTicketsForOrder(newOrder, trx) : []
+        return { order: newOrder, tickets: newTickets }
+      })
 
-    if (isFree) {
-      await sendTicketConfirmationEmail(order, tickets)
+      if (isFree) {
+        await sendTicketConfirmationEmail(order, tickets)
+
+        return ctx.response.status(201).send({
+          data: {
+            orderId: order.id,
+            paymentReference: order.paymentReference,
+            accessToken: order.accessToken,
+            status: order.status,
+            free: true,
+            message:
+              "Réservation gratuite confirmée — aucun paiement n'est nécessaire. Merci de vous munir d'un justificatif (pièce d'identité, carte famille nombreuse…) à l'entrée de l'événement.",
+          },
+        })
+      }
+
+      let paymentRequest
+      try {
+        paymentRequest = await createPaymentRequest({
+          orgId,
+          serviceId: order.serviceId,
+          sourceReference: order.paymentReference!,
+          amountCents: order.totalAmountCents,
+          objectLabel: `Billetterie ${order.qtyTickets} billet${order.qtyTickets > 1 ? 's' : ''}`,
+          payerEmail: order.email,
+          frontRedirectUrl: payload.frontRedirectUrl,
+        })
+      } catch (error) {
+        order.status = 'cancelled'
+        await order.save()
+
+        if (error instanceof SvcGestionError && error.status < 500) {
+          return ctx.response.status(error.status).send(error.body)
+        }
+        throw error
+      }
+
+      order.paymentRequestId = paymentRequest.id
+      order.payfipIdOp = paymentRequest.payfipIdOp
+      order.status = 'awaiting_payment'
+      await order.save()
+
+      await OrderPaymentAttempt.create({
+        orderId: order.id,
+        paymentRequestId: paymentRequest.id,
+        status: 'awaiting_payment',
+        isRetry: false,
+      })
 
       return ctx.response.status(201).send({
         data: {
           orderId: order.id,
-          paymentReference: order.paymentReference,
-          accessToken: order.accessToken,
           status: order.status,
-          free: true,
-          message:
-            "Réservation gratuite confirmée — aucun paiement n'est nécessaire. Merci de vous munir d'un justificatif (pièce d'identité, carte famille nombreuse…) à l'entrée de l'événement.",
+          paymentUrl: paymentRequest.paymentUrl,
+          payfipIdOp: paymentRequest.payfipIdOp,
         },
       })
-    }
-
-    let paymentRequest
-    try {
-      paymentRequest = await createPaymentRequest({
-        orgId,
-        serviceId: order.serviceId,
-        sourceReference: order.paymentReference!,
-        amountCents: order.totalAmountCents,
-        objectLabel: `Billetterie ${order.qtyTickets} billet${order.qtyTickets > 1 ? 's' : ''}`,
-        payerEmail: order.email,
-        frontRedirectUrl: payload.frontRedirectUrl,
-      })
-    } catch (error) {
-      order.status = 'cancelled'
-      await order.save()
-
-      if (error instanceof SvcGestionError && error.status < 500) {
-        return ctx.response.status(error.status).send(error.body)
-      }
-      throw error
-    }
-
-    order.paymentRequestId = paymentRequest.id
-    order.payfipIdOp = paymentRequest.payfipIdOp
-    order.status = 'awaiting_payment'
-    await order.save()
-
-    return ctx.response.status(201).send({
-      data: {
-        orderId: order.id,
-        status: order.status,
-        paymentUrl: paymentRequest.paymentUrl,
-        payfipIdOp: paymentRequest.payfipIdOp,
-      },
     })
   }
 
@@ -453,13 +523,6 @@ export default class OrdersController {
    * POST /orders/agent-sale — vente sur place, encaissement déjà fait
    * physiquement (CB, espèces, chèque...), donc hors circuit PayFiP.
    * Billets générés immédiatement, pas d'attente.
-   *
-   * L'autorisation "cet agent a-t-il le droit de vendre pour CE service
-   * précis" est vérifiée ici via serviceIds (propagé par le Gateway
-   * depuis les services accessibles renvoyés par svc-auth) — pas
-   * seulement au niveau du Gateway, qui ne peut pas le faire pour tous
-   * les endpoints (voir scanTicket, où le service n'est connu qu'après
-   * résolution du ticket).
    */
   async agentSale(ctx: HttpContext) {
     const payload = await ctx.request.validateUsing(agentSaleValidator)
@@ -477,10 +540,6 @@ export default class OrdersController {
       return ctx.response.status(403).send({ error: 'permission_required' })
     }
 
-    // Le JWT client d'un agent peut avoir jusqu'à 20 min de retard sur un
-    // service qu'un admin vient de fermer — le front masque déjà le
-    // bouton de vente, mais l'API doit refuser elle-même, pas seulement
-    // compter sur l'UI.
     const serviceAvailability = await fetchServiceStatus(Number(orgId), payload.serviceId)
     if (
       !serviceAvailability ||
@@ -496,90 +555,76 @@ export default class OrdersController {
       return ctx.response.status(422).send({ error: 'visit_date_closed' })
     }
 
-    let totals
-    try {
-      totals = await computeOrderTotals(Number(orgId), payload.serviceId, payload.tickets)
-    } catch (error) {
-      // Seule une erreur métier connue (tarif inconnu) devient un 422 — une
-      // vraie panne (DB indisponible, bug) ne doit jamais être maquillée
-      // en erreur de saisie du citoyen.
-      if (error instanceof UnknownTariffTypeError) {
-        return ctx.response.status(422).send({ error: 'unknown_tariff_type' })
+    return runOnTenant(payload.serviceId, async () => {
+      let totals
+      try {
+        totals = await computeOrderTotals(Number(orgId), payload.serviceId, payload.tickets)
+      } catch (error) {
+        if (error instanceof UnknownTariffTypeError) {
+          return ctx.response.status(422).send({ error: 'unknown_tariff_type' })
+        }
+        throw error
       }
-      throw error
-    }
 
-    // Commande + lignes + billets : tout ou rien — une vente sur place est
-    // encaissée immédiatement, donc "confirmée" doit toujours vouloir dire
-    // "tous les billets payés existent réellement", jamais moins.
-    const { order, tickets } = await db.transaction(async (trx) => {
-      const newOrder = await Order.create(
-        {
-          orgId: Number(orgId),
-          serviceId: payload.serviceId,
-          email: payload.email,
-          visitDate: payload.visitDate,
-          qtyTickets: totals.qtyTickets,
-          totalAmountCents: totals.totalAmountCents,
-          status: 'confirmed',
-          // Un total à 0€ (tarifs gratuits) n'est ni des espèces ni une
-          // carte : on l'impose côté serveur plutôt que de faire confiance
-          // à ce que le front a choisi par défaut.
-          paymentMethod: totals.totalAmountCents === 0 ? 'free' : payload.paymentMethod,
-          agentId: Number(sub),
-          soldBy: agentLabel(ctx.internalAuth),
-          otpVerifiedAt: null,
+      const connectionName = tenantConnectionStorage.getStore()!
+
+      const { order, tickets } = await db.connection(connectionName).transaction(async (trx) => {
+        const newOrder = await Order.create(
+          {
+            orgId: Number(orgId),
+            serviceId: payload.serviceId,
+            email: payload.email,
+            visitDate: payload.visitDate,
+            qtyTickets: totals.qtyTickets,
+            totalAmountCents: totals.totalAmountCents,
+            status: 'confirmed',
+            paymentMethod: totals.totalAmountCents === 0 ? 'free' : payload.paymentMethod,
+            agentId: Number(sub),
+            soldBy: agentLabel(ctx.internalAuth),
+            otpVerifiedAt: null,
+          },
+          { client: trx }
+        )
+
+        await OrderLine.createMany(
+          totals.lines.map((line) => ({
+            orderId: newOrder.id,
+            tariffType: line.tariffType,
+            quantity: line.quantity,
+            unitPriceCents: line.unitPriceCents,
+          })),
+          { client: trx }
+        )
+
+        newOrder.paymentReference = buildPaymentReference(payload.serviceId, newOrder.id)
+        await newOrder.save()
+
+        const newTickets = await generateTicketsForOrder(newOrder, trx)
+        return { order: newOrder, tickets: newTickets }
+      })
+
+      await sendTicketConfirmationEmail(order, tickets)
+
+      return ctx.response.status(201).send({
+        data: {
+          orderId: order.id,
+          paymentReference: order.paymentReference,
+          status: order.status,
+          tickets: tickets.map(serializeTicket),
         },
-        { client: trx }
-      )
-
-      await OrderLine.createMany(
-        totals.lines.map((line) => ({
-          orderId: newOrder.id,
-          tariffType: line.tariffType,
-          quantity: line.quantity,
-          unitPriceCents: line.unitPriceCents,
-        })),
-        { client: trx }
-      )
-
-      // Même format que les commandes en ligne : un agent qui encaisse sur
-      // place doit pouvoir donner une référence lisible au client, pas
-      // juste l'id brut de la commande.
-      newOrder.paymentReference = `BILL${String(newOrder.id).padStart(8, '0')}`
-      await newOrder.save()
-
-      const newTickets = await generateTicketsForOrder(newOrder, trx)
-      return { order: newOrder, tickets: newTickets }
-    })
-
-    await sendTicketConfirmationEmail(order, tickets)
-
-    return ctx.response.status(201).send({
-      data: {
-        orderId: order.id,
-        paymentReference: order.paymentReference,
-        status: order.status,
-        tickets: tickets.map(serializeTicket),
-      },
+      })
     })
   }
 
   /**
-   * POST /orders/:id/resend-confirmation — renvoie l'email de
-   * confirmation (mêmes billets en pièce jointe), typiquement demandé
-   * juste après une vente sur place si le client n'a rien reçu. Même
-   * fonction que celle appelée automatiquement à la vente — best-effort,
-   * un échec SMTP est rattrapé par le cron existant, pas remonté ici.
+   * POST /orders/:id/resend-confirmation — même périmètre de recherche
+   * que paymentAttempts() (fan-out org entier, permission vérifiée après
+   * coup sur le service réel trouvé).
    */
   async resendConfirmation(ctx: HttpContext) {
     const { orgId, role, servicePermissions, serviceIds } = ctx.internalAuth
 
-    const order = await Order.query()
-      .where('id', Number(ctx.params.id))
-      .where('orgId', orgId)
-      .preload('tickets')
-      .first()
+    const order = await findOrderInOrg(Number(orgId), Number(ctx.params.id))
 
     if (!order) {
       return ctx.response.status(404).send({ error: 'order_not_found' })
@@ -597,25 +642,22 @@ export default class OrdersController {
       return ctx.response.status(409).send({ error: 'order_not_confirmed' })
     }
 
-    await sendTicketConfirmationEmail(order, order.tickets)
+    await runOnTenant(order.serviceId, async () => {
+      const tickets = await Ticket.query().where('orderId', order.id)
+      await sendTicketConfirmationEmail(order, tickets)
+    })
 
     return ctx.response.send({ data: { sent: true } })
   }
 
   /**
-   * GET /orders/:id/agent-tickets-pdf — les billets en PDF pour un
-   * agent/admin authentifié (ex: réimpression juste après une vente sur
-   * place). Distinct de GET /orders/:id/tickets/pdf, qui n'est atteignable
-   * qu'avec l'idOp PayFiP (preuve du citoyen) — une vente sur place n'a
-   * jamais d'idOp puisqu'il n'y a pas de session PayFiP.
+   * GET /orders/:id/agent-tickets-pdf — même périmètre de recherche que
+   * paymentAttempts()/resendConfirmation().
    */
   async agentTicketsPdf(ctx: HttpContext) {
     const { orgId, role, servicePermissions, serviceIds } = ctx.internalAuth
 
-    const order = await Order.query()
-      .where('id', Number(ctx.params.id))
-      .where('orgId', orgId)
-      .first()
+    const order = await findOrderInOrg(Number(orgId), Number(ctx.params.id))
 
     if (!order) {
       return ctx.response.status(404).send({ error: 'order_not_found' })
@@ -629,254 +671,320 @@ export default class OrdersController {
       return ctx.response.status(403).send({ error: 'permission_required' })
     }
 
-    const tickets = await Ticket.query().where('orderId', order.id).orderBy('id', 'asc')
-    if (tickets.length === 0) {
-      return ctx.response.status(404).send({ error: 'no_tickets_for_order' })
-    }
+    return runOnTenant(order.serviceId, async () => {
+      const tickets = await Ticket.query().where('orderId', order.id).orderBy('id', 'asc')
+      if (tickets.length === 0) {
+        return ctx.response.status(404).send({ error: 'no_tickets_for_order' })
+      }
 
-    const pdf = await generateOrderTicketsPdf(tickets, order)
+      const pdf = await generateOrderTicketsPdf(tickets, order)
 
-    ctx.response.header('Content-Type', 'application/pdf')
-    ctx.response.header(
-      'Content-Disposition',
-      `inline; filename="billets-${order.paymentReference ?? order.id}.pdf"`
-    )
-    return ctx.response.send(pdf)
+      ctx.response.header('Content-Type', 'application/pdf')
+      ctx.response.header(
+        'Content-Disposition',
+        `inline; filename="billets-${order.paymentReference ?? order.id}.pdf"`
+      )
+      return ctx.response.send(pdf)
+    })
   }
 
   /**
-   * POST /orders/scan — un agent scanne le QR de commande (affiché sur la
-   * confirmation citoyenne, un seul QR pour tous les billets plutôt qu'un
-   * par billet). Renvoie la liste des billets avec, pour chacun, le même
-   * code signé qu'un QR individuel (`encodeTicketCode`) — le front les
-   * réutilise tels quels contre /tickets/scan pour valider un billet à la
-   * fois ou tous d'un coup, sans dupliquer la logique de consommation
-   * atomique qui vit déjà là-bas.
+   * POST /orders/scan — le code embarque désormais le serviceId (voir
+   * order_code_service.ts) : routage direct, aucun fan-out.
    */
   async scanOrder(ctx: HttpContext) {
     const { code } = await ctx.request.validateUsing(scanOrderValidator)
     const { orgId, role, servicePermissions, serviceIds } = ctx.internalAuth
 
-    const orderId = decodeOrderCode(code)
-    if (!orderId) {
+    const decoded = decodeOrderCode(code)
+    if (!decoded) {
       return ctx.response.status(422).send({ error: 'invalid_signature' })
     }
 
-    const order = await Order.query().where('id', orderId).where('orgId', orgId).first()
-    if (!order) {
-      return ctx.response.status(404).send({ error: 'order_not_found' })
-    }
+    return runOnTenant(decoded.serviceId, async () => {
+      const order = await Order.query().where('id', decoded.orderId).where('orgId', orgId).first()
+      if (!order || order.serviceId !== decoded.serviceId) {
+        return ctx.response.status(404).send({ error: 'order_not_found' })
+      }
 
-    if (!serviceIds?.includes(order.serviceId)) {
-      return ctx.response.status(403).send({ error: 'service_not_allowed_for_agent' })
-    }
+      if (!serviceIds?.includes(order.serviceId)) {
+        return ctx.response.status(403).send({ error: 'service_not_allowed_for_agent' })
+      }
 
-    if (role !== 'admin' && !servicePermissions?.[String(order.serviceId)]?.canScan) {
-      return ctx.response.status(403).send({ error: 'permission_required' })
-    }
+      if (role !== 'admin' && !servicePermissions?.[String(order.serviceId)]?.canScan) {
+        return ctx.response.status(403).send({ error: 'permission_required' })
+      }
 
-    const tickets = await Ticket.query().where('orderId', order.id).orderBy('id', 'asc')
+      const tickets = await Ticket.query().where('orderId', order.id).orderBy('id', 'asc')
 
-    return ctx.response.send({
-      data: {
-        orderId: order.id,
-        paymentReference: order.paymentReference,
-        tickets: tickets.map((t) => ({
-          id: t.id,
-          tariffType: t.tariffType,
-          visitDate: t.visitDate.toISODate(),
-          status: t.status,
-          code: encodeTicketCode(t.id),
-          consumedAt: t.consumedAt?.toISO() ?? null,
-        })),
-      },
+      return ctx.response.send({
+        data: {
+          orderId: order.id,
+          paymentReference: order.paymentReference,
+          tickets: tickets.map((t) => ({
+            id: t.id,
+            tariffType: t.tariffType,
+            visitDate: t.visitDate.toISODate(),
+            status: t.status,
+            code: encodeTicketCode(t.serviceId, t.id),
+            consumedAt: t.consumedAt?.toISO() ?? null,
+          })),
+        },
+      })
     })
   }
 
   /**
-   * GET /orders/:id/tickets — récupération des billets une fois la
-   * commande confirmée (page de confirmation après achat en ligne).
+   * GET /orders/:id/tickets — un id de commande seul ne dit pas quel
+   * service : fan-out borné à l'organisme, désambiguïsé par
+   * hasOrderAccess (idOp/accessToken), jamais par l'id seul.
    */
   async tickets(ctx: HttpContext) {
-    const order = await Order.find(Number(ctx.params.id))
+    const idop = ctx.request.qs().idop
+    const order = await findAccessibleOrder(ctx.internalAuth.orgId, Number(ctx.params.id), idop)
     return respondWithOrderTickets(ctx, order)
   }
 
   /**
-   * GET /orders/by-reference/:reference/tickets — même chose, mais pour
-   * quand le front n'a que l'idOp au retour de PayFiP : svc-gestion lui
-   * renvoie sourceReference (= paymentReference ici), pas notre orderId.
+   * GET /orders/by-reference/:reference/tickets — paymentReference porte
+   * le serviceId : routage direct.
    */
   async ticketsByReference(ctx: HttpContext) {
-    const order = await Order.findBy('paymentReference', ctx.params.reference)
+    const parsed = parsePaymentReference(ctx.params.reference)
+    if (!parsed) {
+      return ctx.response.status(404).send({ error: 'order_not_found' })
+    }
+    const order = await runOnTenant(parsed.serviceId, () =>
+      Order.findBy('paymentReference', ctx.params.reference)
+    )
     return respondWithOrderTickets(ctx, order)
   }
 
-  /**
-   * GET /orders/:id/tickets/:ticketId/pdf, même garde
-   * idOp+orgId que la lecture des billets.
-   */
   async ticketPdf(ctx: HttpContext) {
-    const order = await Order.find(Number(ctx.params.id))
+    const idop = ctx.request.qs().idop
+    const order = await findAccessibleOrder(ctx.internalAuth.orgId, Number(ctx.params.id), idop)
     return respondWithTicketPdf(ctx, order, Number(ctx.params.ticketId))
   }
 
-  /**
-   * GET /orders/by-reference/:reference/tickets/:ticketId/pdf — même
-   * chose, pour le retour PayFiP (le front n'a que sourceReference).
-   */
   async ticketPdfByReference(ctx: HttpContext) {
-    const order = await Order.findBy('paymentReference', ctx.params.reference)
+    const parsed = parsePaymentReference(ctx.params.reference)
+    if (!parsed) {
+      return ctx.response.status(404).send({ error: 'order_not_found' })
+    }
+    const order = await runOnTenant(parsed.serviceId, () =>
+      Order.findBy('paymentReference', ctx.params.reference)
+    )
     return respondWithTicketPdf(ctx, order, Number(ctx.params.ticketId))
   }
 
-  /**
-   * GET /orders/:id/tickets/pdf — tous les billets de la commande en un
-   * seul PDF (une page par billet), pour le confort d'un seul fichier à
-   * sauvegarder/imprimer. Même garde que le PDF à l'unité.
-   */
   async ticketsPdf(ctx: HttpContext) {
-    const order = await Order.find(Number(ctx.params.id))
+    const idop = ctx.request.qs().idop
+    const order = await findAccessibleOrder(ctx.internalAuth.orgId, Number(ctx.params.id), idop)
     return respondWithOrderTicketsPdf(ctx, order)
   }
 
-  /**
-   * GET /orders/by-reference/:reference/tickets/pdf — même chose, pour
-   * le retour PayFiP (le front n'a que sourceReference).
-   */
   async ticketsPdfByReference(ctx: HttpContext) {
-    const order = await Order.findBy('paymentReference', ctx.params.reference)
+    const parsed = parsePaymentReference(ctx.params.reference)
+    if (!parsed) {
+      return ctx.response.status(404).send({ error: 'order_not_found' })
+    }
+    const order = await runOnTenant(parsed.serviceId, () =>
+      Order.findBy('paymentReference', ctx.params.reference)
+    )
     return respondWithOrderTicketsPdf(ctx, order)
   }
 
   /**
-   * POST /orders/by-reference/:reference/retry-payment — nouvel essai
-   * après un paiement refusé/annulé, sur la page de confirmation où le
-   * front n'a que sourceReference + idOp (retour PayFiP). Même garde
-   * idOp+orgId que la lecture des billets : c'est la seule preuve
-   * disponible que l'appelant est bien l'auteur de CETTE commande.
-   *
-   * Ne mute jamais l'ancien payment_request : svc-gestion en crée un
-   * nouveau (donc un nouvel idOp), la commande est juste repointée dessus
-   * — même logique que l'ancienne version 4D.
+   * POST /orders/by-reference/:reference/retry-payment — paymentReference
+   * porte le serviceId : routage direct, aucun fan-out.
    */
   async retryPayment(ctx: HttpContext) {
-    const order = await Order.findBy('paymentReference', ctx.params.reference)
+    const parsed = parsePaymentReference(ctx.params.reference)
+    if (!parsed) {
+      return ctx.response.status(404).send({ error: 'order_not_found' })
+    }
+
     const idop = ctx.request.qs().idop
     const { orgId } = ctx.internalAuth
 
-    if (!order || String(order.orgId) !== orgId || !order.payfipIdOp || order.payfipIdOp !== idop) {
-      return ctx.response.status(404).send({ error: 'order_not_found' })
-    }
+    return runOnTenant(parsed.serviceId, async () => {
+      const order = await Order.findBy('paymentReference', ctx.params.reference)
 
-    if (order.status !== 'cancelled') {
-      return ctx.response.status(409).send({ error: 'order_not_retryable', status: order.status })
-    }
-
-    const payload = await ctx.request.validateUsing(retryOrderPaymentValidator)
-
-    let paymentRequest
-    try {
-      paymentRequest = await retryPaymentRequest(order.paymentRequestId!, {
-        orgId,
-        serviceId: order.serviceId,
-        sourceReference: order.paymentReference!,
-        amountCents: order.totalAmountCents,
-        objectLabel: `Billetterie ${order.qtyTickets} billet${order.qtyTickets > 1 ? 's' : ''}`,
-        payerEmail: order.email,
-        frontRedirectUrl: payload.frontRedirectUrl,
-      })
-    } catch (error) {
-      if (error instanceof SvcGestionError && error.status < 500) {
-        return ctx.response.status(error.status).send(error.body)
+      if (
+        !order ||
+        String(order.orgId) !== orgId ||
+        !order.payfipIdOp ||
+        order.payfipIdOp !== idop
+      ) {
+        return ctx.response.status(404).send({ error: 'order_not_found' })
       }
-      throw error
-    }
 
-    order.paymentRequestId = paymentRequest.id
-    order.payfipIdOp = paymentRequest.payfipIdOp
-    order.status = 'awaiting_payment'
-    order.retryCount += 1
-    await order.save()
+      if (order.status !== 'cancelled') {
+        return ctx.response
+          .status(409)
+          .send({ error: 'order_not_retryable', status: order.status })
+      }
 
-    return ctx.response.send({
-      data: {
+      const payload = await ctx.request.validateUsing(retryOrderPaymentValidator)
+
+      let paymentRequest
+      try {
+        paymentRequest = await retryPaymentRequest(order.paymentRequestId!, {
+          orgId,
+          serviceId: order.serviceId,
+          sourceReference: order.paymentReference!,
+          amountCents: order.totalAmountCents,
+          objectLabel: `Billetterie ${order.qtyTickets} billet${order.qtyTickets > 1 ? 's' : ''}`,
+          payerEmail: order.email,
+          frontRedirectUrl: payload.frontRedirectUrl,
+        })
+      } catch (error) {
+        if (error instanceof SvcGestionError && error.status < 500) {
+          return ctx.response.status(error.status).send(error.body)
+        }
+        throw error
+      }
+
+      order.paymentRequestId = paymentRequest.id
+      order.payfipIdOp = paymentRequest.payfipIdOp
+      order.status = 'awaiting_payment'
+      order.retryCount += 1
+      await order.save()
+
+      await OrderPaymentAttempt.create({
         orderId: order.id,
-        status: order.status,
-        paymentUrl: paymentRequest.paymentUrl,
-        payfipIdOp: paymentRequest.payfipIdOp,
-      },
+        paymentRequestId: paymentRequest.id,
+        status: 'awaiting_payment',
+        isRetry: true,
+      })
+
+      return ctx.response.send({
+        data: {
+          orderId: order.id,
+          status: order.status,
+          paymentUrl: paymentRequest.paymentUrl,
+          payfipIdOp: paymentRequest.payfipIdOp,
+        },
+      })
     })
   }
 
   /**
-   * POST /payment-webhooks — appelé par svc-gestion (pair à pair, hors
-   * Gateway, authentifié par JWT interne — voir internal_jwt_middleware).
+   * POST /payment-webhooks — sourceReference porte le serviceId : routage
+   * direct, aucun fan-out.
    */
   async paymentWebhook(ctx: HttpContext) {
     const payload = await ctx.request.validateUsing(paymentWebhookValidator)
 
-    const order = await Order.findBy('paymentReference', payload.sourceReference)
-    if (!order) {
+    const parsed = parsePaymentReference(payload.sourceReference)
+    if (!parsed) {
       return ctx.response.status(404).send({ error: 'order_not_found' })
     }
 
-    // Raccourci en lecture seule — la vraie garde d'idempotence est
-    // l'UPDATE...WHERE conditionnel plus bas, seul point réellement
-    // atomique face à deux webhooks concurrents pour la même commande.
-    if (order.status !== 'awaiting_payment') {
-      return ctx.response.send({ received: true, alreadyProcessed: true })
-    }
+    return runOnTenant(parsed.serviceId, async () => {
+      const order = await Order.findBy('paymentReference', payload.sourceReference)
+      if (!order) {
+        return ctx.response.status(404).send({ error: 'order_not_found' })
+      }
 
-    if (
-      payload.amountCents !== order.totalAmountCents ||
-      payload.paymentRequestId !== order.paymentRequestId
-    ) {
-      logger.warn(
-        { orderId: order.id, payload },
-        'paymentWebhook rejeté — montant ou paymentRequestId incohérent'
-      )
-      return ctx.response.status(422).send({ error: 'payment_webhook_mismatch' })
-    }
+      if (order.status !== 'awaiting_payment') {
+        return ctx.response.send({ received: true, alreadyProcessed: true })
+      }
 
-    if (payload.status === 'paid') {
-      // "confirmée" doit toujours vouloir dire "tous les billets payés
-      // existent" — sans transaction, un billet qui plante en cours de
-      // génération laisserait une commande confirmée avec moins de
-      // billets que payés, invisible tant que le citoyen ne s'en aperçoit
-      // pas sur place. Le UPDATE...WHERE status='awaiting_payment' est le
-      // verrou : si deux webhooks pour la même commande arrivent en même
-      // temps (rejeu du job de retry pendant qu'une première livraison
-      // lente est encore en cours), un seul gagne la transition et génère
-      // les billets — l'autre voit rows.length === 0 et ne fait rien.
-      const tickets = await db.transaction(async (trx) => {
-        const rows = await trx
+      if (
+        payload.amountCents !== order.totalAmountCents ||
+        payload.paymentRequestId !== order.paymentRequestId
+      ) {
+        logger.warn(
+          { orderId: order.id, payload },
+          'paymentWebhook rejeté — montant ou paymentRequestId incohérent'
+        )
+        return ctx.response.status(422).send({ error: 'payment_webhook_mismatch' })
+      }
+
+      const connectionName = tenantConnectionStorage.getStore()!
+      const paidAt = payload.status === 'paid' ? DateTime.now() : null
+
+      if (payload.status === 'paid') {
+        const tickets = await db.connection(connectionName).transaction(async (trx) => {
+          const rows = await trx
+            .from('orders')
+            .where('id', order.id)
+            .where('status', 'awaiting_payment')
+            .update({ status: 'confirmed', updated_at: DateTime.now().toSQL() }, ['*'])
+
+          if (rows.length === 0) {
+            return null
+          }
+
+          order.status = 'confirmed'
+          return generateTicketsForOrder(order, trx)
+        })
+
+        if (tickets) {
+          await sendTicketConfirmationEmail(order, tickets)
+          await OrderPaymentAttempt.query()
+            .where('orderId', order.id)
+            .where('paymentRequestId', payload.paymentRequestId)
+            .update({ status: 'paid', paidAt: paidAt?.toSQL() })
+        }
+      } else {
+        const rows = await db
+          .connection(connectionName)
           .from('orders')
           .where('id', order.id)
           .where('status', 'awaiting_payment')
-          .update({ status: 'confirmed', updated_at: DateTime.now().toSQL() }, ['*'])
+          .update({ status: 'cancelled', updated_at: DateTime.now().toSQL() }, ['id'])
 
-        if (rows.length === 0) {
-          return null
+        if (rows.length > 0) {
+          await OrderPaymentAttempt.query()
+            .where('orderId', order.id)
+            .where('paymentRequestId', payload.paymentRequestId)
+            .update({ status: 'failed' })
         }
-
-        order.status = 'confirmed'
-        return generateTicketsForOrder(order, trx)
-      })
-
-      if (tickets) {
-        await sendTicketConfirmationEmail(order, tickets)
       }
-    } else {
-      await db
-        .from('orders')
-        .where('id', order.id)
-        .where('status', 'awaiting_payment')
-        .update({ status: 'cancelled', updated_at: DateTime.now().toSQL() })
-    }
 
-    return ctx.response.send({ received: true })
+      return ctx.response.send({ received: true })
+    })
   }
+}
+
+/**
+ * Recherche une commande par id à travers toutes les bases tenant de
+ * l'organisme — même périmètre que la requête `where('orgId', orgId)`
+ * d'avant le split, qui ne filtrait pas déjà par service. Utilisé par les
+ * routes agent (paymentAttempts/resendConfirmation/agentTicketsPdf) où le
+ * droit d'agir est vérifié après coup sur le service réel trouvé.
+ */
+async function findOrderInOrg(orgId: number, orderId: number): Promise<Order | null> {
+  const serviceIds = await ensureTenantConnectionsForOrg(orgId)
+  for (const serviceId of serviceIds) {
+    const order = await runOnTenant(serviceId, () =>
+      Order.query().where('id', orderId).where('orgId', orgId).first()
+    )
+    if (order) return order
+  }
+  return null
+}
+
+/**
+ * Recherche une commande citoyenne accessible : fan-out borné à
+ * l'organisme, désambiguïsé par hasOrderAccess (idOp/accessToken) — un
+ * id de commande peut exister dans plusieurs bases tenant du même
+ * organisme (chaque service a sa propre séquence d'id), mais au plus une
+ * seule aura le bon secret.
+ */
+async function findAccessibleOrder(
+  orgId: string,
+  orderId: number,
+  idop: unknown
+): Promise<Order | null> {
+  const serviceIds = await ensureTenantConnectionsForOrg(Number(orgId))
+  for (const serviceId of serviceIds) {
+    const order = await runOnTenant(serviceId, () => Order.find(orderId))
+    if (order && hasOrderAccess(order, orgId, idop)) return order
+  }
+  return null
 }
 
 async function respondWithOrderTickets(ctx: HttpContext, order: Order | null) {
@@ -886,15 +994,17 @@ async function respondWithOrderTickets(ctx: HttpContext, order: Order | null) {
     return ctx.response.status(404).send({ error: 'order_not_found' })
   }
 
-  const tickets = await Ticket.query().where('orderId', order.id)
+  return runOnTenant(order.serviceId, async () => {
+    const tickets = await Ticket.query().where('orderId', order.id)
 
-  return ctx.response.send({
-    data: {
-      orderId: order.id,
-      status: order.status,
-      orderCode: encodeOrderCode(order.id),
-      tickets: tickets.map(serializeTicket),
-    },
+    return ctx.response.send({
+      data: {
+        orderId: order.id,
+        status: order.status,
+        orderCode: encodeOrderCode(order.serviceId, order.id),
+        tickets: tickets.map(serializeTicket),
+      },
+    })
   })
 }
 
@@ -905,16 +1015,18 @@ async function respondWithTicketPdf(ctx: HttpContext, order: Order | null, ticke
     return ctx.response.status(404).send({ error: 'order_not_found' })
   }
 
-  const ticket = await Ticket.query().where('id', ticketId).where('orderId', order.id).first()
-  if (!ticket) {
-    return ctx.response.status(404).send({ error: 'ticket_not_found' })
-  }
+  return runOnTenant(order.serviceId, async () => {
+    const ticket = await Ticket.query().where('id', ticketId).where('orderId', order.id).first()
+    if (!ticket) {
+      return ctx.response.status(404).send({ error: 'ticket_not_found' })
+    }
 
-  const pdf = await generateTicketPdf(ticket, order)
+    const pdf = await generateTicketPdf(ticket, order)
 
-  ctx.response.header('Content-Type', 'application/pdf')
-  ctx.response.header('Content-Disposition', `attachment; filename="billet-${ticket.id}.pdf"`)
-  return ctx.response.send(pdf)
+    ctx.response.header('Content-Type', 'application/pdf')
+    ctx.response.header('Content-Disposition', `attachment; filename="billet-${ticket.id}.pdf"`)
+    return ctx.response.send(pdf)
+  })
 }
 
 async function respondWithOrderTicketsPdf(ctx: HttpContext, order: Order | null) {
@@ -924,19 +1036,21 @@ async function respondWithOrderTicketsPdf(ctx: HttpContext, order: Order | null)
     return ctx.response.status(404).send({ error: 'order_not_found' })
   }
 
-  const tickets = await Ticket.query().where('orderId', order.id).orderBy('id', 'asc')
-  if (tickets.length === 0) {
-    return ctx.response.status(404).send({ error: 'no_tickets_for_order' })
-  }
+  return runOnTenant(order.serviceId, async () => {
+    const tickets = await Ticket.query().where('orderId', order.id).orderBy('id', 'asc')
+    if (tickets.length === 0) {
+      return ctx.response.status(404).send({ error: 'no_tickets_for_order' })
+    }
 
-  const pdf = await generateOrderTicketsPdf(tickets, order)
+    const pdf = await generateOrderTicketsPdf(tickets, order)
 
-  ctx.response.header('Content-Type', 'application/pdf')
-  ctx.response.header(
-    'Content-Disposition',
-    `attachment; filename="billets-${order.paymentReference ?? order.id}.pdf"`
-  )
-  return ctx.response.send(pdf)
+    ctx.response.header('Content-Type', 'application/pdf')
+    ctx.response.header(
+      'Content-Disposition',
+      `attachment; filename="billets-${order.paymentReference ?? order.id}.pdf"`
+    )
+    return ctx.response.send(pdf)
+  })
 }
 
 /**
@@ -944,7 +1058,7 @@ async function respondWithOrderTicketsPdf(ctx: HttpContext, order: Order | null)
  * en plus de orgId, il faut le payfip_id_op (paiement PayFiP réel) OU
  * l'access_token (généré à la création, seule preuve disponible pour une
  * commande gratuite qui n'a jamais de session PayFiP). Référence seule
- * (BILLxxxxxxxx) est prévisible, ni l'un ni l'autre ne l'est.
+ * (BILLxxxxxxxxxxxxxx) est prévisible, ni l'un ni l'autre ne l'est.
  */
 function hasOrderAccess(order: Order, orgId: string, idop: unknown): boolean {
   if (String(order.orgId) !== orgId) return false

@@ -21,6 +21,12 @@ export default await Env.create(new URL('../', import.meta.url), {
   GATEWAY_JWT_PUBLIC_KEY: Env.schema.string(),
   INSCRIPTION_JWT_PUBLIC_KEY: Env.schema.string(),
 
+  // URL publique du gateway — utilisée uniquement par les exemples d'emails
+  // du mode démo (voir StaffController#example) pour construire une URL de
+  // logo réelle (/services/:id/logo), même variable que
+  // PAYFIP_PUBLIC_BASE_URL côté billetterie/factures/inscription.
+  PAYFIP_PUBLIC_BASE_URL: Env.schema.string.optional(),
+
   MAIL_MODE: Env.schema.enum(['fake', 'real'] as const),
   SMTP_HOST: Env.schema.string.optional(),
   SMTP_PORT: Env.schema.number.optional(),

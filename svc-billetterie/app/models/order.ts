@@ -1,14 +1,15 @@
 import { DateTime } from 'luxon'
-import { BaseModel, column, hasMany } from '@adonisjs/lucid/orm'
+import { column, hasMany } from '@adonisjs/lucid/orm'
 import type { HasMany } from '@adonisjs/lucid/types/relations'
 import Ticket from '#models/ticket'
 import OrderLine from '#models/order_line'
+import TenantBaseModel from '#models/tenant_base_model'
 import { ORDER_STATUSES, PAYMENT_METHODS } from '#database/enums'
 
 export type OrderStatus = (typeof ORDER_STATUSES)[number]
 export type PaymentMethod = (typeof PAYMENT_METHODS)[number]
 
-export default class Order extends BaseModel {
+export default class Order extends TenantBaseModel {
   @column({ isPrimary: true })
   declare id: number
 

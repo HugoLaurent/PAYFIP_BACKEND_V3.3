@@ -1,7 +1,8 @@
 import { DateTime } from 'luxon'
-import { BaseModel, column, hasMany } from '@adonisjs/lucid/orm'
+import { column, hasMany } from '@adonisjs/lucid/orm'
 import type { HasMany } from '@adonisjs/lucid/types/relations'
 import Registration from '#models/registration'
+import TenantBaseModel from '#models/tenant_base_model'
 import { EVENT_TYPES, EVENT_STATUSES, FORM_FIELD_TYPES } from '#database/enums'
 
 export type EventType = (typeof EVENT_TYPES)[number]
@@ -30,7 +31,7 @@ export interface DocumentRequirement {
   required: boolean
 }
 
-export default class Event extends BaseModel {
+export default class Event extends TenantBaseModel {
   @column({ isPrimary: true })
   declare id: number
 

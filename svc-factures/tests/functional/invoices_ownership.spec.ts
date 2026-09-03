@@ -1,22 +1,30 @@
 import { test } from '@japa/runner'
 import Invoice from '#models/invoice'
 import { mintTestInternalJwt } from '#tests/helpers/internal_auth'
+import { runOnTenant } from '#services/tenant_connection_service'
+import { encodeInvoiceCode } from '#services/invoice_code_service'
+
+// Doit être un serviceId provisionné dans tenant_databases (voir
+// tenant:provision) pour l'environnement où ces tests tournent.
+const TEST_SERVICE_ID = 1
 
 function uniqueRef(tag: string): string {
   return `HOSP-${tag}-${Date.now()}-${Math.floor(Math.random() * 1e6)}`
 }
 
 async function createInvoice(overrides: Partial<Invoice> = {}) {
-  return Invoice.create({
-    orgId: 1,
-    serviceId: 1,
-    hospitalReference: uniqueRef('own'),
-    amountCents: 5000,
-    objectLabel: 'Consultation',
-    fiscalYear: 2026,
-    status: 'draft',
-    ...overrides,
-  })
+  return runOnTenant(TEST_SERVICE_ID, () =>
+    Invoice.create({
+      orgId: 1,
+      serviceId: TEST_SERVICE_ID,
+      hospitalReference: uniqueRef('own'),
+      amountCents: 5000,
+      objectLabel: 'Consultation',
+      fiscalYear: 2026,
+      status: 'draft',
+      ...overrides,
+    })
+  )
 }
 
 test.group('InvoicesController#pay — isolation inter-organismes', () => {
@@ -27,7 +35,7 @@ test.group('InvoicesController#pay — isolation inter-organismes', () => {
     const attackerToken = await mintTestInternalJwt({ orgId: '2', scope: 'factures' })
 
     const res = await client
-      .post(`/invoices/${invoice.id}/pay`)
+      .post(`/invoices/${encodeInvoiceCode(TEST_SERVICE_ID, invoice.id)}/pay`)
       .header('Authorization', `Bearer ${attackerToken}`)
       .json({
         frontRedirectUrl: 'https://front.invalid.test/return',
@@ -51,7 +59,7 @@ test.group('InvoicesController#pay — isolation inter-organismes', () => {
     const token = await mintTestInternalJwt({ orgId: '1', scope: 'factures' })
 
     const res = await client
-      .post(`/invoices/${invoice.id}/pay`)
+      .post(`/invoices/${encodeInvoiceCode(TEST_SERVICE_ID, invoice.id)}/pay`)
       .header('Authorization', `Bearer ${token}`)
       .json({
         frontRedirectUrl: 'https://front.invalid.test/return',

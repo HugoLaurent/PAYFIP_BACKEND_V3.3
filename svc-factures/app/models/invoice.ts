@@ -1,10 +1,11 @@
 import { DateTime } from 'luxon'
-import { BaseModel, column } from '@adonisjs/lucid/orm'
+import { column } from '@adonisjs/lucid/orm'
 import { INVOICE_STATUSES } from '#database/enums'
+import TenantBaseModel from '#models/tenant_base_model'
 
 export type InvoiceStatus = (typeof INVOICE_STATUSES)[number]
 
-export default class Invoice extends BaseModel {
+export default class Invoice extends TenantBaseModel {
   static finalStatuses: InvoiceStatus[] = ['confirmed', 'cancelled']
 
   @column({ isPrimary: true })

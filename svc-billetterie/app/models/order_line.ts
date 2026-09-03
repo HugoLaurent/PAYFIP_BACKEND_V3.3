@@ -1,9 +1,10 @@
 import { DateTime } from 'luxon'
-import { BaseModel, belongsTo, column } from '@adonisjs/lucid/orm'
+import { belongsTo, column } from '@adonisjs/lucid/orm'
 import type { BelongsTo } from '@adonisjs/lucid/types/relations'
 import Order from '#models/order'
+import TenantBaseModel from '#models/tenant_base_model'
 
-export default class OrderLine extends BaseModel {
+export default class OrderLine extends TenantBaseModel {
   @column({ isPrimary: true })
   declare id: number
 

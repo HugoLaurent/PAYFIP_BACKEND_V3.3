@@ -1,14 +1,15 @@
 import { DateTime } from 'luxon'
-import { BaseModel, belongsTo, column, hasMany } from '@adonisjs/lucid/orm'
+import { belongsTo, column, hasMany } from '@adonisjs/lucid/orm'
 import type { BelongsTo, HasMany } from '@adonisjs/lucid/types/relations'
 import Event from '#models/event'
 import RegistrationDocument from '#models/registration_document'
+import TenantBaseModel from '#models/tenant_base_model'
 import { REGISTRATION_STATUSES, PAYMENT_METHODS } from '#database/enums'
 
 export type RegistrationStatus = (typeof REGISTRATION_STATUSES)[number]
 export type PaymentMethod = (typeof PAYMENT_METHODS)[number]
 
-export default class Registration extends BaseModel {
+export default class Registration extends TenantBaseModel {
   @column({ isPrimary: true })
   declare id: number
 

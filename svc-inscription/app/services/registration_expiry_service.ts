@@ -1,6 +1,8 @@
 import { DateTime } from 'luxon'
 import Registration from '#models/registration'
 import { promoteNextWaitlisted } from '#services/waitlist_service'
+import { refreshTenantRegistry } from '#services/tenant_registry_client'
+import { runOnAllTenants } from '#services/tenant_connection_service'
 
 // Une session de paiement PayFiP expire elle-même après ~15 min (voir le
 // commentaire équivalent dans svc-billetterie/app/services/svc_gestion_client.ts
@@ -25,51 +27,70 @@ export interface ExpirySweepResult {
  *  - `waitlisted` notifiée dont le délai de confirmation est dépassé → `expired`
  * Chaque libération de place déclenche promoteNextWaitlisted pour l'évènement
  * concerné, qui ne fait rien si personne n'attend.
+ *
+ * Appelée par la commande ace `registrations:process-expirations`, qui ne
+ * tourne jamais assez longtemps pour bénéficier du rafraîchissement
+ * périodique de l'annuaire (réservé au serveur HTTP) : rechargement
+ * explicite avant le fan-out sur toutes les bases tenant connues.
  */
 export async function processRegistrationExpirations(): Promise<ExpirySweepResult> {
-  const now = DateTime.now()
-  const result: ExpirySweepResult = {
-    expiredAwaitingPayment: 0,
-    cancelledUnresolvedRejections: 0,
-    expiredWaitlistOffers: 0,
-  }
+  await refreshTenantRegistry()
 
-  const staleAwaitingPayment = await Registration.query()
-    .where('status', 'awaiting_payment')
-    .where('updatedAt', '<', now.minus({ minutes: AWAITING_PAYMENT_EXPIRY_MINUTES }).toSQL()!)
+  const perTenant = await runOnAllTenants(async () => {
+    const now = DateTime.now()
+    const result: ExpirySweepResult = {
+      expiredAwaitingPayment: 0,
+      cancelledUnresolvedRejections: 0,
+      expiredWaitlistOffers: 0,
+    }
 
-  for (const registration of staleAwaitingPayment) {
-    registration.status = 'expired'
-    await registration.save()
-    result.expiredAwaitingPayment += 1
-    await promoteNextWaitlisted(registration.eventId)
-  }
+    const staleAwaitingPayment = await Registration.query()
+      .where('status', 'awaiting_payment')
+      .where('updatedAt', '<', now.minus({ minutes: AWAITING_PAYMENT_EXPIRY_MINUTES }).toSQL()!)
 
-  const overdueRejections = await Registration.query()
-    .where('status', 'rejected')
-    .whereNotNull('documentDeadlineAt')
-    .where('documentDeadlineAt', '<', now.toSQL()!)
+    for (const registration of staleAwaitingPayment) {
+      registration.status = 'expired'
+      await registration.save()
+      result.expiredAwaitingPayment += 1
+      await promoteNextWaitlisted(registration.eventId)
+    }
 
-  for (const registration of overdueRejections) {
-    registration.status = 'cancelled'
-    registration.cancelledAt = now
-    await registration.save()
-    result.cancelledUnresolvedRejections += 1
-    await promoteNextWaitlisted(registration.eventId)
-  }
+    const overdueRejections = await Registration.query()
+      .where('status', 'rejected')
+      .whereNotNull('documentDeadlineAt')
+      .where('documentDeadlineAt', '<', now.toSQL()!)
 
-  const overdueWaitlistOffers = await Registration.query()
-    .where('status', 'waitlisted')
-    .whereNotNull('waitlistNotifiedAt')
-    .whereNotNull('waitlistResponseDeadline')
-    .where('waitlistResponseDeadline', '<', now.toSQL()!)
+    for (const registration of overdueRejections) {
+      registration.status = 'cancelled'
+      registration.cancelledAt = now
+      await registration.save()
+      result.cancelledUnresolvedRejections += 1
+      await promoteNextWaitlisted(registration.eventId)
+    }
 
-  for (const registration of overdueWaitlistOffers) {
-    registration.status = 'expired'
-    await registration.save()
-    result.expiredWaitlistOffers += 1
-    await promoteNextWaitlisted(registration.eventId)
-  }
+    const overdueWaitlistOffers = await Registration.query()
+      .where('status', 'waitlisted')
+      .whereNotNull('waitlistNotifiedAt')
+      .whereNotNull('waitlistResponseDeadline')
+      .where('waitlistResponseDeadline', '<', now.toSQL()!)
 
-  return result
+    for (const registration of overdueWaitlistOffers) {
+      registration.status = 'expired'
+      await registration.save()
+      result.expiredWaitlistOffers += 1
+      await promoteNextWaitlisted(registration.eventId)
+    }
+
+    return result
+  })
+
+  return perTenant.reduce(
+    (total, r) => ({
+      expiredAwaitingPayment: total.expiredAwaitingPayment + r.expiredAwaitingPayment,
+      cancelledUnresolvedRejections:
+        total.cancelledUnresolvedRejections + r.cancelledUnresolvedRejections,
+      expiredWaitlistOffers: total.expiredWaitlistOffers + r.expiredWaitlistOffers,
+    }),
+    { expiredAwaitingPayment: 0, cancelledUnresolvedRejections: 0, expiredWaitlistOffers: 0 }
+  )
 }

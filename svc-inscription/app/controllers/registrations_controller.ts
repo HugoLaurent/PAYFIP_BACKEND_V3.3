@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import { DateTime } from 'luxon'
+import vine from '@vinejs/vine'
 import type { HttpContext } from '@adonisjs/core/http'
 import logger from '@adonisjs/core/services/logger'
 import db from '@adonisjs/lucid/services/db'
@@ -9,9 +10,12 @@ import Event from '#models/event'
 import type { FormField, DocumentRequirement } from '#models/event'
 import Registration from '#models/registration'
 import RegistrationDocument from '#models/registration_document'
+import RegistrationPaymentAttempt from '#models/registration_payment_attempt'
 import {
   createRegistrationValidator,
   listRegistrationsValidator,
+  listRegistrationsStaffValidator,
+  paymentAttemptsQueryValidator,
   reviewRegistrationValidator,
   retryRegistrationPaymentValidator,
   payRegistrationValidator,
@@ -33,6 +37,21 @@ import {
   sendPaymentRequestEmail,
   sendRegistrationRejectionEmail,
 } from '#services/registration_mail_service'
+import { notifyOpsAlert } from '#services/ops_alert_service'
+import {
+  runOnTenant,
+  ensureTenantConnectionsForOrg,
+  tenantConnectionStorage,
+} from '#services/tenant_connection_service'
+
+// db.transaction()/db.from() sans argument ciblent la connexion primaire
+// (`pg`), pas la connexion tenant active — contrairement aux méthodes
+// statiques de TenantBaseModel, ils ne lisent pas l'AsyncLocalStorage
+// eux-mêmes. Toujours passer par db.connection(name) dans une portée
+// runOnTenant().
+function currentTenantDb() {
+  return db.connection(tenantConnectionStorage.getStore()!)
+}
 
 // Documents : PDF/PNG/JPEG, 8 Mo/fichier — un fichier par exigence nommée
 // (voir Event.DocumentRequirement, plafonné à 5 par événement côté
@@ -53,6 +72,40 @@ const DOCUMENT_RESUBMIT_DEADLINE_DAYS = 7
 // rester utile le jour même, assez long pour qu'un double-clic ou un agent
 // impatient n'inonde pas le citoyen.
 const REMINDER_COOLDOWN_MINUTES = 15
+
+// L'id d'inscription seul n'est plus unique globalement depuis le split
+// par service (chaque base tenant a sa propre séquence d'id) — le
+// serviceId est embarqué dans la référence elle-même (largeur fixe,
+// parsable) pour que showByReference()/paymentWebhook() routent
+// directement vers la bonne base tenant, sans jamais avoir à interroger
+// tous les services d'un organisme pour retrouver une inscription (même
+// principe que svc-factures, voir F3 du plan de migration DB-per-tenant).
+const REFERENCE_SERVICE_ID_WIDTH = 6
+const REFERENCE_REGISTRATION_ID_WIDTH = 8
+const PAYMENT_REFERENCE_RE = new RegExp(
+  `^INSC(\\d{${REFERENCE_SERVICE_ID_WIDTH}})(\\d{${REFERENCE_REGISTRATION_ID_WIDTH}})$`
+)
+
+function buildPaymentReference(serviceId: number, registrationId: number): string {
+  return `INSC${String(serviceId).padStart(REFERENCE_SERVICE_ID_WIDTH, '0')}${String(
+    registrationId
+  ).padStart(REFERENCE_REGISTRATION_ID_WIDTH, '0')}`
+}
+
+function parsePaymentReference(reference: string): { serviceId: number; registrationId: number } | null {
+  const match = PAYMENT_REFERENCE_RE.exec(reference)
+  if (!match) return null
+  return { serviceId: Number(match[1]), registrationId: Number(match[2]) }
+}
+
+// serviceId requis en query pour toute route agent portant un :id — voir
+// le même raisonnement que serviceIdQueryValidator côté
+// events_controller.ts.
+const serviceIdQueryValidator = vine.compile(
+  vine.object({
+    serviceId: vine.number().positive(),
+  })
+)
 
 function eventRequiresDocuments(event: Event): boolean {
   return (event.documentRequirements?.length ?? 0) > 0
@@ -185,38 +238,79 @@ function serializeRegistrationForAgent(registration: Registration) {
   }
 }
 
-/**
- * Preuve de possession pour les routes `by-token/*` : l'accessToken seul,
- * plus l'appartenance à l'organisme du JWT interne (défense en
- * profondeur — le token en lui-même est déjà la preuve principale, non
- * devinable).
- */
-async function findRegistrationByAccessToken(
-  orgId: string,
-  accessToken: string
-): Promise<{ registration: Registration; event: Event } | null> {
-  const registration = await Registration.query()
-    .where('accessToken', accessToken)
-    .where('orgId', orgId)
-    .first()
-
-  if (!registration) return null
-
-  const event = await Event.find(registration.eventId)
-  if (!event) return null
-
-  return { registration, event }
+/** Vue tous organismes pour le staff — jamais formResponses ni documents. */
+function serializeRegistrationForStaff(registration: Registration) {
+  return {
+    id: registration.id,
+    createdAt: registration.createdAt.toISO(),
+    orgId: registration.orgId,
+    serviceId: registration.serviceId,
+    eventId: registration.eventId,
+    firstName: registration.firstName,
+    lastName: registration.lastName,
+    email: registration.email,
+    status: registration.status,
+    amountCents: registration.priceCentsAtRegistration,
+    paymentMethod: registration.paymentMethod,
+    registrationReference: registration.paymentReference ?? String(registration.id),
+  }
 }
 
 /**
- * Preuve de possession équivalente à findRegistrationByAccessToken, mais
- * pour le retour navigateur PayFiP : à cet instant le front ne connaît
- * que `sourceReference`/`idop` (ajoutés par svc-gestion à frontRedirectUrl,
- * voir payfip_callbacks_controller.ts côté svc-gestion), jamais
- * l'accessToken (impossible de le connaître avant la création de
- * l'inscription elle-même, qui a lieu dans la même requête que l'appel à
- * createPaymentRequest). Même garde que hasOrderAccess côté
- * svc-billetterie : idop doit matcher payfipIdOp OU accessToken.
+ * Résout un accessToken sans serviceId connu (le citoyen ne l'a jamais
+ * reçu) : fan-out borné sur les services inscription de l'organisme.
+ * Échec fermé si plusieurs services matchent le même token — un UUID à
+ * 128 bits qui collide est en pratique impossible, donc un signal
+ * d'intégrité de données plutôt qu'un cas à couvrir en silence (même
+ * principe que verify() côté svc-factures).
+ */
+async function resolveRegistrationByAccessToken(
+  orgId: string,
+  accessToken: string
+): Promise<{ serviceId: number; registration: Registration; event: Event } | null> {
+  const numericOrgId = Number(orgId)
+  const serviceIds = await ensureTenantConnectionsForOrg(numericOrgId)
+
+  const matches: { serviceId: number; registration: Registration; event: Event }[] = []
+  for (const serviceId of serviceIds) {
+    const found = await runOnTenant(serviceId, async () => {
+      const registration = await Registration.query()
+        .where('accessToken', accessToken)
+        .where('orgId', orgId)
+        .first()
+      if (!registration) return null
+      const event = await Event.find(registration.eventId)
+      if (!event) return null
+      return { registration, event }
+    })
+    if (found) matches.push({ serviceId, ...found })
+  }
+
+  if (matches.length === 0) return null
+
+  if (matches.length > 1) {
+    const conflictingServiceIds = matches.map((m) => m.serviceId)
+    logger.error(
+      { orgId, conflictingServiceIds },
+      'resolveRegistrationByAccessToken(): accessToken dupliqué entre plusieurs services du même organisme'
+    )
+    await notifyOpsAlert(
+      'accessToken inscription dupliqué entre services',
+      `orgId=${orgId} présent dans les services ${conflictingServiceIds.join(', ')} — échec fermé.`
+    )
+    return null
+  }
+
+  return matches[0]
+}
+
+/**
+ * Preuve de possession équivalente à resolveRegistrationByAccessToken,
+ * mais pour le retour navigateur PayFiP : à cet instant le front ne
+ * connaît que `sourceReference`/`idop` (ajoutés par svc-gestion à
+ * frontRedirectUrl), jamais l'accessToken. Même garde que
+ * hasOrderAccess côté svc-billetterie : idop doit matcher payfipIdOp OU
+ * accessToken.
  */
 function hasRegistrationAccess(registration: Registration, orgId: string, idop: unknown): boolean {
   if (String(registration.orgId) !== orgId) return false
@@ -227,25 +321,37 @@ function hasRegistrationAccess(registration: Registration, orgId: string, idop: 
 export default class RegistrationsController {
   /**
    * GET /registrations/by-reference/:reference — lecture par preuve
-   * idop (retour PayFiP), pas par accessToken. Renvoie la même forme que
-   * showByToken, y compris l'accessToken lui-même une fois la preuve
-   * validée : le front peut ensuite continuer via les routes by-token/*
-   * habituelles (annulation, paiement, attestation...).
+   * idop (retour PayFiP), pas par accessToken. serviceId est embarqué
+   * dans la référence : routage direct, aucun fan-out. Renvoie la même
+   * forme que showByToken, y compris l'accessToken lui-même une fois la
+   * preuve validée.
    */
   async showByReference(ctx: HttpContext) {
-    const registration = await Registration.findBy('paymentReference', ctx.params.reference)
-    const idop = ctx.request.qs().idop
-    if (!registration || !hasRegistrationAccess(registration, ctx.internalAuth.orgId, idop)) {
+    const parsed = parsePaymentReference(ctx.params.reference)
+    if (!parsed) {
       return ctx.response.status(404).send({ error: 'registration_not_found' })
     }
-    const event = await Event.find(registration.eventId)
-    if (!event) return ctx.response.status(404).send({ error: 'registration_not_found' })
 
-    return ctx.response.send({
-      data: { ...serializeRegistrationForCitizen(registration, event), accessToken: registration.accessToken },
+    const idop = ctx.request.qs().idop
+    const { orgId } = ctx.internalAuth
+
+    return runOnTenant(parsed.serviceId, async () => {
+      const registration = await Registration.find(parsed.registrationId)
+      if (
+        !registration ||
+        registration.paymentReference !== ctx.params.reference ||
+        !hasRegistrationAccess(registration, orgId, idop)
+      ) {
+        return ctx.response.status(404).send({ error: 'registration_not_found' })
+      }
+      const event = await Event.find(registration.eventId)
+      if (!event) return ctx.response.status(404).send({ error: 'registration_not_found' })
+
+      return ctx.response.send({
+        data: { ...serializeRegistrationForCitizen(registration, event), accessToken: registration.accessToken },
+      })
     })
   }
-
 
   /**
    * POST /registrations — inscription simple (sans justificatif), JSON.
@@ -260,38 +366,41 @@ export default class RegistrationsController {
     const verified = await isEmailVerified(payload.email)
     if (!verified) return ctx.response.status(403).send({ error: 'email_not_otp_verified' })
 
-    const event = await Event.query()
-      .where('id', payload.eventId)
-      .where('orgId', orgId)
-      .where('status', 'published')
-      .first()
-    if (!event) return ctx.response.status(404).send({ error: 'event_not_found' })
+    return runOnTenant(payload.serviceId, async () => {
+      const event = await Event.query()
+        .where('id', payload.eventId)
+        .where('orgId', orgId)
+        .where('serviceId', payload.serviceId)
+        .where('status', 'published')
+        .first()
+      if (!event) return ctx.response.status(404).send({ error: 'event_not_found' })
 
-    if (eventRequiresDocuments(event)) {
-      return ctx.response.status(422).send({ error: 'documents_required' })
-    }
+      if (eventRequiresDocuments(event)) {
+        return ctx.response.status(422).send({ error: 'documents_required' })
+      }
 
-    if (event.registrationDeadline && event.registrationDeadline < DateTime.now()) {
-      return ctx.response.status(422).send({ error: 'registration_closed' })
-    }
+      if (event.registrationDeadline && event.registrationDeadline < DateTime.now()) {
+        return ctx.response.status(422).send({ error: 'registration_closed' })
+      }
 
-    const quantity = payload.quantity ?? 1
-    if (quantity > event.maxParticipantsPerRegistration) {
-      return ctx.response.status(422).send({ error: 'quantity_exceeds_max' })
-    }
+      const quantity = payload.quantity ?? 1
+      if (quantity > event.maxParticipantsPerRegistration) {
+        return ctx.response.status(422).send({ error: 'quantity_exceeds_max' })
+      }
 
-    const formError = validateFormResponses(event.formSchema, payload.formResponses)
-    if (formError) {
-      return ctx.response.status(422).send({ error: 'invalid_form_responses', detail: formError })
-    }
+      const formError = validateFormResponses(event.formSchema, payload.formResponses)
+      if (formError) {
+        return ctx.response.status(422).send({ error: 'invalid_form_responses', detail: formError })
+      }
 
-    return this.createRegistrationAndRespond(ctx, event, {
-      firstName: payload.firstName,
-      lastName: payload.lastName,
-      email: payload.email,
-      quantity,
-      formResponses: payload.formResponses ?? null,
-      frontRedirectUrl: payload.frontRedirectUrl,
+      return this.createRegistrationAndRespond(ctx, event, {
+        firstName: payload.firstName,
+        lastName: payload.lastName,
+        email: payload.email,
+        quantity,
+        formResponses: payload.formResponses ?? null,
+        frontRedirectUrl: payload.frontRedirectUrl,
+      })
     })
   }
 
@@ -310,6 +419,7 @@ export default class RegistrationsController {
       'firstName',
       'lastName',
       'eventId',
+      'serviceId',
       'quantity',
       'formResponses',
       'frontRedirectUrl',
@@ -319,10 +429,18 @@ export default class RegistrationsController {
     const firstName = typeof fields.firstName === 'string' ? fields.firstName.trim() : ''
     const lastName = typeof fields.lastName === 'string' ? fields.lastName.trim() : ''
     const eventId = Number(fields.eventId)
+    const serviceId = Number(fields.serviceId)
     const quantity = fields.quantity ? Number(fields.quantity) : 1
     const frontRedirectUrl = typeof fields.frontRedirectUrl === 'string' ? fields.frontRedirectUrl : ''
 
-    if (!email || !firstName || !lastName || !Number.isFinite(eventId) || !frontRedirectUrl) {
+    if (
+      !email ||
+      !firstName ||
+      !lastName ||
+      !Number.isFinite(eventId) ||
+      !Number.isFinite(serviceId) ||
+      !frontRedirectUrl
+    ) {
       return ctx.response.status(422).send({ error: 'invalid_payload' })
     }
 
@@ -338,40 +456,43 @@ export default class RegistrationsController {
     const verified = await isEmailVerified(email)
     if (!verified) return ctx.response.status(403).send({ error: 'email_not_otp_verified' })
 
-    const event = await Event.query()
-      .where('id', eventId)
-      .where('orgId', orgId)
-      .where('status', 'published')
-      .first()
-    if (!event) return ctx.response.status(404).send({ error: 'event_not_found' })
+    return runOnTenant(serviceId, async () => {
+      const event = await Event.query()
+        .where('id', eventId)
+        .where('orgId', orgId)
+        .where('serviceId', serviceId)
+        .where('status', 'published')
+        .first()
+      if (!event) return ctx.response.status(404).send({ error: 'event_not_found' })
 
-    if (event.registrationDeadline && event.registrationDeadline < DateTime.now()) {
-      return ctx.response.status(422).send({ error: 'registration_closed' })
-    }
+      if (event.registrationDeadline && event.registrationDeadline < DateTime.now()) {
+        return ctx.response.status(422).send({ error: 'registration_closed' })
+      }
 
-    if (quantity > event.maxParticipantsPerRegistration) {
-      return ctx.response.status(422).send({ error: 'quantity_exceeds_max' })
-    }
+      if (quantity > event.maxParticipantsPerRegistration) {
+        return ctx.response.status(422).send({ error: 'quantity_exceeds_max' })
+      }
 
-    const formError = validateFormResponses(event.formSchema, formResponses)
-    if (formError) {
-      return ctx.response.status(422).send({ error: 'invalid_form_responses', detail: formError })
-    }
+      const formError = validateFormResponses(event.formSchema, formResponses)
+      if (formError) {
+        return ctx.response.status(422).send({ error: 'invalid_form_responses', detail: formError })
+      }
 
-    const requirements = event.documentRequirements ?? []
-    if (requirements.length === 0) {
-      return ctx.response.status(422).send({ error: 'documents_not_required' })
-    }
+      const requirements = event.documentRequirements ?? []
+      if (requirements.length === 0) {
+        return ctx.response.status(422).send({ error: 'documents_not_required' })
+      }
 
-    const result = await this.readNamedDocuments(ctx, requirements, { requireAll: true })
-    if (!result.ok) return ctx.response.status(result.status).send(result.body)
+      const result = await this.readNamedDocuments(ctx, requirements, { requireAll: true })
+      if (!result.ok) return ctx.response.status(result.status).send(result.body)
 
-    return this.createRegistrationAndRespond(
-      ctx,
-      event,
-      { firstName, lastName, email, quantity, formResponses, frontRedirectUrl },
-      result.documents
-    )
+      return this.createRegistrationAndRespond(
+        ctx,
+        event,
+        { firstName, lastName, email, quantity, formResponses, frontRedirectUrl },
+        result.documents
+      )
+    })
   }
 
   /**
@@ -425,8 +546,9 @@ export default class RegistrationsController {
 
   /**
    * Logique commune à store()/storeWithDocuments() : vérification de
-   * capacité (liste d'attente si complet — voir plan §0bis point 1 et
-   * parcours D), puis branche gratuit/payant (parcours A/B/C).
+   * capacité (liste d'attente si complet), puis branche gratuit/payant.
+   * Appelée depuis l'intérieur d'un runOnTenant(event.serviceId, ...) déjà
+   * ouvert par l'appelant.
    */
   private async createRegistrationAndRespond(
     ctx: HttpContext,
@@ -446,7 +568,7 @@ export default class RegistrationsController {
     const capacityCheck = await checkCapacity(event, input.quantity)
 
     if (!capacityCheck.fits) {
-      const registration = await db.transaction(async (trx) => {
+      const registration = await currentTenantDb().transaction(async (trx) => {
         const r = await Registration.create(
           {
             orgId: Number(orgId),
@@ -489,7 +611,7 @@ export default class RegistrationsController {
     // final immédiat (parcours A/B).
     const initialStatus = eventRequiresDocuments(event) ? 'awaiting_review' : isFree ? 'confirmed' : 'awaiting_payment'
 
-    const registration = await db.transaction(async (trx) => {
+    const registration = await currentTenantDb().transaction(async (trx) => {
       const r = await Registration.create(
         {
           orgId: Number(orgId),
@@ -508,7 +630,7 @@ export default class RegistrationsController {
         },
         { client: trx }
       )
-      r.paymentReference = `INSC${String(r.id).padStart(8, '0')}`
+      r.paymentReference = buildPaymentReference(event.serviceId, r.id)
       await r.useTransaction(trx).save()
 
       if (documents) {
@@ -520,9 +642,7 @@ export default class RegistrationsController {
     if (eventRequiresDocuments(event)) {
       // awaiting_review : l'agent doit d'abord valider les justificatifs
       // avant tout email/paiement (parcours C). Pas d'email de
-      // notification agent — la cloche du tableau de bord suffit, et évite
-      // un envoi par agent assigné à chaque inscription (40 inscriptions ×
-      // 3 agents = 120 mails sinon).
+      // notification agent — la cloche du tableau de bord suffit.
       return ctx.response.status(201).send({
         data: {
           registrationId: registration.id,
@@ -554,12 +674,6 @@ export default class RegistrationsController {
         serviceId: registration.serviceId,
         sourceReference: registration.paymentReference!,
         amountCents: registration.priceCentsAtRegistration,
-        // OBJET générique, jamais le titre de l'évènement : l'OBJET PayFiP
-        // peut finir sur le relevé bancaire du payeur (visible par
-        // d'autres que lui) et surtout, non borné, un titre trop long fait
-        // échouer PayFiP ("erreur fonctionnelle O1 : la valeur de l'OBJET
-        // est incorrecte") — même principe que svc-factures/svc-billetterie,
-        // qui envoient déjà un libellé court et fixe.
         objectLabel: 'Inscription',
         payerEmail: registration.email,
         frontRedirectUrl: input.frontRedirectUrl,
@@ -579,6 +693,13 @@ export default class RegistrationsController {
     registration.paymentRequestId = paymentRequest.id
     registration.payfipIdOp = paymentRequest.payfipIdOp
     await registration.save()
+
+    await RegistrationPaymentAttempt.create({
+      registrationId: registration.id,
+      paymentRequestId: paymentRequest.id,
+      status: 'awaiting_payment',
+      isRetry: false,
+    })
 
     return ctx.response.status(201).send({
       data: {
@@ -617,10 +738,12 @@ export default class RegistrationsController {
    * les données d'affichage des écrans d'état E1-E6.
    */
   async showByToken(ctx: HttpContext) {
-    const found = await findRegistrationByAccessToken(ctx.internalAuth.orgId, ctx.params.accessToken)
+    const found = await resolveRegistrationByAccessToken(ctx.internalAuth.orgId, ctx.params.accessToken)
     if (!found) return ctx.response.status(404).send({ error: 'registration_not_found' })
 
-    return ctx.response.send({ data: serializeRegistrationForCitizen(found.registration, found.event) })
+    return runOnTenant(found.serviceId, async () => {
+      return ctx.response.send({ data: serializeRegistrationForCitizen(found.registration, found.event) })
+    })
   }
 
   /**
@@ -631,58 +754,60 @@ export default class RegistrationsController {
    * `awaiting_review` sans reformulaire.
    */
   async replaceDocuments(ctx: HttpContext) {
-    const found = await findRegistrationByAccessToken(ctx.internalAuth.orgId, ctx.params.accessToken)
+    const found = await resolveRegistrationByAccessToken(ctx.internalAuth.orgId, ctx.params.accessToken)
     if (!found) return ctx.response.status(404).send({ error: 'registration_not_found' })
-    const { registration, event } = found
+    const { serviceId, registration, event } = found
 
-    if (registration.status !== 'rejected') {
-      return ctx.response.status(409).send({ error: 'registration_not_rejected' })
-    }
-    if (registration.documentDeadlineAt && registration.documentDeadlineAt < DateTime.now()) {
-      return ctx.response.status(422).send({ error: 'document_deadline_passed' })
-    }
-
-    const requirements = event.documentRequirements ?? []
-    // Vrai rejet : toutes les exigences doivent être redéposées (les
-    // anciens documents seront invalidés). Complément demandé
-    // (keepExistingDocuments) : au moins une pièce suffit, les autres
-    // restent telles que déposées initialement.
-    const result = await this.readNamedDocuments(ctx, requirements, {
-      requireAll: !registration.keepExistingDocuments,
-    })
-    if (!result.ok) return ctx.response.status(result.status).send(result.body)
-    const processedFiles = result.documents
-
-    await db.transaction(async (trx) => {
-      if (!registration.keepExistingDocuments) {
-        // Vrai rejet : tout l'ancien jeu de documents est invalidé, le
-        // citoyen redépose tout.
-        await RegistrationDocument.query({ client: trx })
-          .where('registrationId', registration.id)
-          .update({ isCurrent: false })
-      } else {
-        // Complément demandé : seules les exigences effectivement
-        // redéposées ici remplacent leur version courante — les autres
-        // pièces déjà déposées restent `isCurrent` inchangées.
-        for (const doc of processedFiles) {
-          await RegistrationDocument.query({ client: trx })
-            .where('registrationId', registration.id)
-            .where('documentKey', doc.key)
-            .update({ isCurrent: false })
-        }
+    return runOnTenant(serviceId, async () => {
+      if (registration.status !== 'rejected') {
+        return ctx.response.status(409).send({ error: 'registration_not_rejected' })
+      }
+      if (registration.documentDeadlineAt && registration.documentDeadlineAt < DateTime.now()) {
+        return ctx.response.status(422).send({ error: 'document_deadline_passed' })
       }
 
-      await this.storeDocuments(registration.id, processedFiles, trx)
+      const requirements = event.documentRequirements ?? []
+      // Vrai rejet : toutes les exigences doivent être redéposées (les
+      // anciens documents seront invalidés). Complément demandé
+      // (keepExistingDocuments) : au moins une pièce suffit, les autres
+      // restent telles que déposées initialement.
+      const result = await this.readNamedDocuments(ctx, requirements, {
+        requireAll: !registration.keepExistingDocuments,
+      })
+      if (!result.ok) return ctx.response.status(result.status).send(result.body)
+      const processedFiles = result.documents
 
-      await registration.useTransaction(trx).merge({
-        status: 'awaiting_review',
-        rejectionReason: null,
-        documentDeadlineAt: null,
-        keepExistingDocuments: false,
-      }).save()
+      await currentTenantDb().transaction(async (trx) => {
+        if (!registration.keepExistingDocuments) {
+          // Vrai rejet : tout l'ancien jeu de documents est invalidé, le
+          // citoyen redépose tout.
+          await RegistrationDocument.query({ client: trx })
+            .where('registrationId', registration.id)
+            .update({ isCurrent: false })
+        } else {
+          // Complément demandé : seules les exigences effectivement
+          // redéposées ici remplacent leur version courante — les autres
+          // pièces déjà déposées restent `isCurrent` inchangées.
+          for (const doc of processedFiles) {
+            await RegistrationDocument.query({ client: trx })
+              .where('registrationId', registration.id)
+              .where('documentKey', doc.key)
+              .update({ isCurrent: false })
+          }
+        }
+
+        await this.storeDocuments(registration.id, processedFiles, trx)
+
+        await registration.useTransaction(trx).merge({
+          status: 'awaiting_review',
+          rejectionReason: null,
+          documentDeadlineAt: null,
+          keepExistingDocuments: false,
+        }).save()
+      })
+
+      return ctx.response.send({ data: { status: registration.status } })
     })
-
-    return ctx.response.send({ data: { status: registration.status } })
   }
 
   /**
@@ -691,167 +816,170 @@ export default class RegistrationsController {
    * `registrationDeadline`.
    */
   async cancelByToken(ctx: HttpContext) {
-    const found = await findRegistrationByAccessToken(ctx.internalAuth.orgId, ctx.params.accessToken)
+    const found = await resolveRegistrationByAccessToken(ctx.internalAuth.orgId, ctx.params.accessToken)
     if (!found) return ctx.response.status(404).send({ error: 'registration_not_found' })
-    const { registration, event } = found
+    const { serviceId, registration, event } = found
 
-    if (['cancelled', 'expired'].includes(registration.status)) {
-      return ctx.response.status(409).send({ error: 'registration_already_terminal' })
-    }
-    if (event.registrationDeadline && event.registrationDeadline < DateTime.now()) {
-      return ctx.response.status(422).send({ error: 'registration_deadline_passed' })
-    }
+    return runOnTenant(serviceId, async () => {
+      if (['cancelled', 'expired'].includes(registration.status)) {
+        return ctx.response.status(409).send({ error: 'registration_already_terminal' })
+      }
+      if (event.registrationDeadline && event.registrationDeadline < DateTime.now()) {
+        return ctx.response.status(422).send({ error: 'registration_deadline_passed' })
+      }
 
-    registration.status = 'cancelled'
-    registration.cancelledAt = DateTime.now()
-    await registration.save()
+      registration.status = 'cancelled'
+      registration.cancelledAt = DateTime.now()
+      await registration.save()
 
-    await promoteNextWaitlisted(event.id)
+      await promoteNextWaitlisted(event.id)
 
-    return ctx.response.send({ data: { status: registration.status } })
+      return ctx.response.send({ data: { status: registration.status } })
+    })
   }
 
   /**
    * POST /registrations/by-token/:accessToken/pay — 1re création de
    * session PayFiP (parcours B/C), OU confirmation d'une offre de liste
-   * d'attente active (parcours D, maquette) : faute d'un endpoint dédié
-   * dans le plan, cette même route sert de point d'action unique pour "je
-   * veux cette place maintenant", qu'elle soit gratuite ou payante.
+   * d'attente active (parcours D, maquette).
    */
   async payByToken(ctx: HttpContext) {
-    const found = await findRegistrationByAccessToken(ctx.internalAuth.orgId, ctx.params.accessToken)
+    const found = await resolveRegistrationByAccessToken(ctx.internalAuth.orgId, ctx.params.accessToken)
     if (!found) return ctx.response.status(404).send({ error: 'registration_not_found' })
-    const { registration, event } = found
+    const { serviceId, registration, event } = found
 
     const payload = await ctx.request.validateUsing(payRegistrationValidator)
 
-    const hasActiveWaitlistOffer =
-      registration.status === 'waitlisted' &&
-      registration.waitlistNotifiedAt !== null &&
-      (registration.waitlistResponseDeadline === null || registration.waitlistResponseDeadline > DateTime.now())
+    return runOnTenant(serviceId, async () => {
+      const hasActiveWaitlistOffer =
+        registration.status === 'waitlisted' &&
+        registration.waitlistNotifiedAt !== null &&
+        (registration.waitlistResponseDeadline === null || registration.waitlistResponseDeadline > DateTime.now())
 
-    if (hasActiveWaitlistOffer) {
-      // Confirmation de l'offre : on sort de la liste d'attente vers le
-      // parcours normal — justificatifs si l'évènement en exige, sinon
-      // statut final direct (gratuit) ou awaiting_payment (payant),
-      // formulaire déjà fourni à l'inscription initiale (voir plan §3 D).
-      registration.waitlistPosition = null
-      registration.waitlistNotifiedAt = null
-      registration.waitlistResponseDeadline = null
+      if (hasActiveWaitlistOffer) {
+        // Confirmation de l'offre : on sort de la liste d'attente vers le
+        // parcours normal.
+        registration.waitlistPosition = null
+        registration.waitlistNotifiedAt = null
+        registration.waitlistResponseDeadline = null
 
-      if (eventRequiresDocuments(event)) {
-        registration.status = 'awaiting_review'
+        if (eventRequiresDocuments(event)) {
+          registration.status = 'awaiting_review'
+          await registration.save()
+          return ctx.response.send({ data: { status: registration.status } })
+        }
+
+        if (registration.priceCentsAtRegistration === 0) {
+          registration.status = 'confirmed'
+          await registration.save()
+          await sendRegistrationConfirmationEmail(registration, event)
+          return ctx.response.send({ data: { status: registration.status } })
+        }
+
+        registration.paymentReference ??= buildPaymentReference(serviceId, registration.id)
         await registration.save()
-        return ctx.response.send({ data: { status: registration.status } })
+        // Tombe dans la branche paiement ci-dessous.
+      } else if (registration.status !== 'awaiting_payment') {
+        return ctx.response.status(409).send({ error: 'registration_not_payable', status: registration.status })
       }
 
-      if (registration.priceCentsAtRegistration === 0) {
-        registration.status = 'confirmed'
-        await registration.save()
-        await sendRegistrationConfirmationEmail(registration, event)
-        return ctx.response.send({ data: { status: registration.status } })
+      let paymentRequest
+      try {
+        paymentRequest = await createPaymentRequest({
+          orgId: ctx.internalAuth.orgId,
+          serviceId: registration.serviceId,
+          sourceReference: registration.paymentReference!,
+          amountCents: registration.priceCentsAtRegistration,
+          objectLabel: 'Inscription',
+          payerEmail: registration.email,
+          frontRedirectUrl: payload.frontRedirectUrl,
+        })
+      } catch (error) {
+        if (error instanceof SvcGestionError && error.status < 500) {
+          return ctx.response.status(error.status).send(error.body)
+        }
+        throw error
       }
 
-      registration.paymentReference ??= `INSC${String(registration.id).padStart(8, '0')}`
+      registration.status = 'awaiting_payment'
+      registration.paymentRequestId = paymentRequest.id
+      registration.payfipIdOp = paymentRequest.payfipIdOp
       await registration.save()
-      // Tombe dans la branche paiement ci-dessous.
-    } else if (registration.status !== 'awaiting_payment') {
-      return ctx.response.status(409).send({ error: 'registration_not_payable', status: registration.status })
-    }
 
-    let paymentRequest
-    try {
-      paymentRequest = await createPaymentRequest({
-        orgId: ctx.internalAuth.orgId,
-        serviceId: registration.serviceId,
-        sourceReference: registration.paymentReference!,
-        amountCents: registration.priceCentsAtRegistration,
-        // OBJET générique, jamais le titre de l'évènement : l'OBJET PayFiP
-        // peut finir sur le relevé bancaire du payeur (visible par
-        // d'autres que lui) et surtout, non borné, un titre trop long fait
-        // échouer PayFiP ("erreur fonctionnelle O1 : la valeur de l'OBJET
-        // est incorrecte") — même principe que svc-factures/svc-billetterie,
-        // qui envoient déjà un libellé court et fixe.
-        objectLabel: 'Inscription',
-        payerEmail: registration.email,
-        frontRedirectUrl: payload.frontRedirectUrl,
+      await RegistrationPaymentAttempt.create({
+        registrationId: registration.id,
+        paymentRequestId: paymentRequest.id,
+        status: 'awaiting_payment',
+        isRetry: false,
       })
-    } catch (error) {
-      if (error instanceof SvcGestionError && error.status < 500) {
-        return ctx.response.status(error.status).send(error.body)
-      }
-      throw error
-    }
 
-    registration.status = 'awaiting_payment'
-    registration.paymentRequestId = paymentRequest.id
-    registration.payfipIdOp = paymentRequest.payfipIdOp
-    await registration.save()
-
-    return ctx.response.send({
-      data: {
-        status: registration.status,
-        paymentUrl: paymentRequest.paymentUrl,
-        payfipIdOp: paymentRequest.payfipIdOp,
-      },
+      return ctx.response.send({
+        data: {
+          status: registration.status,
+          paymentUrl: paymentRequest.paymentUrl,
+          payfipIdOp: paymentRequest.payfipIdOp,
+        },
+      })
     })
   }
 
   /**
    * POST /registrations/by-token/:accessToken/retry-payment — nouvel
    * essai après un paiement refusé/annulé, tant que la place n'a pas été
-   * reprise par quelqu'un d'autre (registration encore `cancelled`, pas
-   * redevenue `waitlisted`/réattribuée).
+   * reprise par quelqu'un d'autre.
    */
   async retryPayment(ctx: HttpContext) {
-    const found = await findRegistrationByAccessToken(ctx.internalAuth.orgId, ctx.params.accessToken)
+    const found = await resolveRegistrationByAccessToken(ctx.internalAuth.orgId, ctx.params.accessToken)
     if (!found) return ctx.response.status(404).send({ error: 'registration_not_found' })
-    const { registration } = found
+    const { serviceId, registration } = found
 
-    if (registration.status !== 'cancelled' || !registration.payfipIdOp) {
-      return ctx.response
-        .status(409)
-        .send({ error: 'registration_not_retryable', status: registration.status })
-    }
-
-    const payload = await ctx.request.validateUsing(retryRegistrationPaymentValidator)
-
-    let paymentRequest
-    try {
-      paymentRequest = await retryPaymentRequest(registration.paymentRequestId!, {
-        orgId: ctx.internalAuth.orgId,
-        serviceId: registration.serviceId,
-        sourceReference: registration.paymentReference!,
-        amountCents: registration.priceCentsAtRegistration,
-        // OBJET générique, jamais le titre de l'évènement : l'OBJET PayFiP
-        // peut finir sur le relevé bancaire du payeur (visible par
-        // d'autres que lui) et surtout, non borné, un titre trop long fait
-        // échouer PayFiP ("erreur fonctionnelle O1 : la valeur de l'OBJET
-        // est incorrecte") — même principe que svc-factures/svc-billetterie,
-        // qui envoient déjà un libellé court et fixe.
-        objectLabel: 'Inscription',
-        payerEmail: registration.email,
-        frontRedirectUrl: payload.frontRedirectUrl,
-      })
-    } catch (error) {
-      if (error instanceof SvcGestionError && error.status < 500) {
-        return ctx.response.status(error.status).send(error.body)
+    return runOnTenant(serviceId, async () => {
+      if (registration.status !== 'cancelled' || !registration.payfipIdOp) {
+        return ctx.response
+          .status(409)
+          .send({ error: 'registration_not_retryable', status: registration.status })
       }
-      throw error
-    }
 
-    registration.paymentRequestId = paymentRequest.id
-    registration.payfipIdOp = paymentRequest.payfipIdOp
-    registration.status = 'awaiting_payment'
-    registration.retryCount += 1
-    await registration.save()
+      const payload = await ctx.request.validateUsing(retryRegistrationPaymentValidator)
 
-    return ctx.response.send({
-      data: {
-        status: registration.status,
-        paymentUrl: paymentRequest.paymentUrl,
-        payfipIdOp: paymentRequest.payfipIdOp,
-      },
+      let paymentRequest
+      try {
+        paymentRequest = await retryPaymentRequest(registration.paymentRequestId!, {
+          orgId: ctx.internalAuth.orgId,
+          serviceId: registration.serviceId,
+          sourceReference: registration.paymentReference!,
+          amountCents: registration.priceCentsAtRegistration,
+          objectLabel: 'Inscription',
+          payerEmail: registration.email,
+          frontRedirectUrl: payload.frontRedirectUrl,
+        })
+      } catch (error) {
+        if (error instanceof SvcGestionError && error.status < 500) {
+          return ctx.response.status(error.status).send(error.body)
+        }
+        throw error
+      }
+
+      registration.paymentRequestId = paymentRequest.id
+      registration.payfipIdOp = paymentRequest.payfipIdOp
+      registration.status = 'awaiting_payment'
+      registration.retryCount += 1
+      await registration.save()
+
+      await RegistrationPaymentAttempt.create({
+        registrationId: registration.id,
+        paymentRequestId: paymentRequest.id,
+        status: 'awaiting_payment',
+        isRetry: true,
+      })
+
+      return ctx.response.send({
+        data: {
+          status: registration.status,
+          paymentUrl: paymentRequest.paymentUrl,
+          payfipIdOp: paymentRequest.payfipIdOp,
+        },
+      })
     })
   }
 
@@ -860,293 +988,418 @@ export default class RegistrationsController {
    * uniquement si `confirmed`.
    */
   async downloadAttestation(ctx: HttpContext) {
-    const found = await findRegistrationByAccessToken(ctx.internalAuth.orgId, ctx.params.accessToken)
+    const found = await resolveRegistrationByAccessToken(ctx.internalAuth.orgId, ctx.params.accessToken)
     if (!found) return ctx.response.status(404).send({ error: 'registration_not_found' })
-    const { registration, event } = found
+    const { serviceId, registration, event } = found
 
-    if (registration.status !== 'confirmed') {
-      return ctx.response.status(409).send({ error: 'registration_not_confirmed' })
-    }
+    return runOnTenant(serviceId, async () => {
+      if (registration.status !== 'confirmed') {
+        return ctx.response.status(409).send({ error: 'registration_not_confirmed' })
+      }
 
-    const pdf = await generateRegistrationAttestationPdf(registration, event)
+      const pdf = await generateRegistrationAttestationPdf(registration, event)
 
-    ctx.response.header('Content-Type', 'application/pdf')
-    ctx.response.header(
-      'Content-Disposition',
-      `attachment; filename="attestation-${registration.paymentReference ?? registration.id}.pdf"`
-    )
-    return ctx.response.send(pdf)
-  }
-
-  /**
-   * POST /payment-webhooks — appelé par svc-gestion (pair à pair, hors
-   * Gateway). Transition idempotente via UPDATE...WHERE conditionnel dans
-   * une transaction — jamais un simple read-then-write (même garde que
-   * paymentWebhook côté svc-billetterie).
-   */
-  async paymentWebhook(ctx: HttpContext) {
-    const payload = await ctx.request.validateUsing(paymentWebhookValidator)
-
-    const registration = await Registration.findBy('paymentReference', payload.sourceReference)
-    if (!registration) {
-      return ctx.response.status(404).send({ error: 'registration_not_found' })
-    }
-
-    if (registration.status !== 'awaiting_payment') {
-      return ctx.response.send({ received: true, alreadyProcessed: true })
-    }
-
-    if (
-      payload.amountCents !== registration.priceCentsAtRegistration ||
-      payload.paymentRequestId !== registration.paymentRequestId
-    ) {
-      logger.warn(
-        { registrationId: registration.id, payload },
-        'paymentWebhook rejeté — montant ou paymentRequestId incohérent'
+      ctx.response.header('Content-Type', 'application/pdf')
+      ctx.response.header(
+        'Content-Disposition',
+        `attachment; filename="attestation-${registration.paymentReference ?? registration.id}.pdf"`
       )
-      return ctx.response.status(422).send({ error: 'payment_webhook_mismatch' })
-    }
-
-    if (payload.status === 'paid') {
-      const confirmed = await db.transaction(async (trx) => {
-        const rows = await trx
-          .from('registrations')
-          .where('id', registration.id)
-          .where('status', 'awaiting_payment')
-          .update({ status: 'confirmed', updated_at: DateTime.now().toSQL() }, ['*'])
-
-        return rows.length > 0
-      })
-
-      if (confirmed) {
-        registration.status = 'confirmed'
-        const event = await Event.find(registration.eventId)
-        if (event) await sendRegistrationConfirmationEmail(registration, event)
-      }
-    } else {
-      const rows = await db
-        .from('registrations')
-        .where('id', registration.id)
-        .where('status', 'awaiting_payment')
-        .update({ status: 'cancelled', updated_at: DateTime.now().toSQL() }, ['id'])
-
-      if (rows.length > 0) {
-        await promoteNextWaitlisted(registration.eventId)
-      }
-    }
-
-    return ctx.response.send({ received: true })
-  }
-
-  /**
-   * GET /events/:id/registrations — résumé des inscrits pour un
-   * évènement (statut, contact, état de la revue documentaire).
-   */
-  async index(ctx: HttpContext) {
-    const { orgId, role, servicePermissions } = ctx.internalAuth
-    const { status, q, page, perPage } = await ctx.request.validateUsing(listRegistrationsValidator)
-
-    const event = await Event.query().where('id', Number(ctx.params.id)).where('orgId', orgId).first()
-    if (!event) return ctx.response.status(404).send({ error: 'event_not_found' })
-
-    if (role !== 'admin' && !servicePermissions?.[String(event.serviceId)]?.canViewHistory) {
-      return ctx.response.status(403).send({ error: 'permission_required' })
-    }
-
-    const query = Registration.query()
-      .where('eventId', event.id)
-      .preload('documents')
-      .orderBy('createdAt', 'desc')
-
-    if (status) query.where('status', status)
-    if (q) {
-      query.where((sub) => {
-        sub
-          .whereILike('email', `%${q}%`)
-          .orWhereILike('firstName', `%${q}%`)
-          .orWhereILike('lastName', `%${q}%`)
-          .orWhereILike('paymentReference', `%${q}%`)
-      })
-    }
-
-    const registrations = await query.paginate(page ?? 1, perPage ?? 25)
-
-    return ctx.response.send({
-      data: registrations.all().map(serializeRegistrationForAgent),
-      meta: registrations.getMeta(),
+      return ctx.response.send(pdf)
     })
   }
 
   /**
-   * POST /registrations/:id/review — décision de l'agent sur les
-   * justificatifs déposés (parcours C).
+   * POST /payment-webhooks — appelé par svc-gestion (pair à pair, hors
+   * Gateway). sourceReference porte le serviceId : routage direct, aucun
+   * fan-out. Transition idempotente via UPDATE...WHERE conditionnel dans
+   * une transaction — jamais un simple read-then-write.
+   */
+  async paymentWebhook(ctx: HttpContext) {
+    const payload = await ctx.request.validateUsing(paymentWebhookValidator)
+
+    const parsed = parsePaymentReference(payload.sourceReference)
+    if (!parsed) {
+      return ctx.response.status(404).send({ error: 'registration_not_found' })
+    }
+
+    return runOnTenant(parsed.serviceId, async () => {
+      const registration = await Registration.find(parsed.registrationId)
+      if (!registration || registration.paymentReference !== payload.sourceReference) {
+        return ctx.response.status(404).send({ error: 'registration_not_found' })
+      }
+
+      if (registration.status !== 'awaiting_payment') {
+        return ctx.response.send({ received: true, alreadyProcessed: true })
+      }
+
+      if (
+        payload.amountCents !== registration.priceCentsAtRegistration ||
+        payload.paymentRequestId !== registration.paymentRequestId
+      ) {
+        logger.warn(
+          { registrationId: registration.id, payload },
+          'paymentWebhook rejeté — montant ou paymentRequestId incohérent'
+        )
+        return ctx.response.status(422).send({ error: 'payment_webhook_mismatch' })
+      }
+
+      if (payload.status === 'paid') {
+        const confirmed = await currentTenantDb().transaction(async (trx) => {
+          const rows = await trx
+            .from('registrations')
+            .where('id', registration.id)
+            .where('status', 'awaiting_payment')
+            .update({ status: 'confirmed', updated_at: DateTime.now().toSQL() }, ['*'])
+
+          return rows.length > 0
+        })
+
+        if (confirmed) {
+          registration.status = 'confirmed'
+          const event = await Event.find(registration.eventId)
+          if (event) await sendRegistrationConfirmationEmail(registration, event)
+
+          await RegistrationPaymentAttempt.query()
+            .where('registrationId', registration.id)
+            .where('paymentRequestId', payload.paymentRequestId)
+            .update({ status: 'paid', paidAt: DateTime.now().toSQL() })
+        }
+      } else {
+        const rows = await currentTenantDb()
+          .from('registrations')
+          .where('id', registration.id)
+          .where('status', 'awaiting_payment')
+          .update({ status: 'cancelled', updated_at: DateTime.now().toSQL() }, ['id'])
+
+        if (rows.length > 0) {
+          await promoteNextWaitlisted(registration.eventId)
+
+          await RegistrationPaymentAttempt.query()
+            .where('registrationId', registration.id)
+            .where('paymentRequestId', payload.paymentRequestId)
+            .update({ status: 'failed' })
+        }
+      }
+
+      return ctx.response.send({ received: true })
+    })
+  }
+
+  /**
+   * GET /events/:id/registrations?serviceId= — résumé des inscrits pour
+   * un évènement (statut, contact, état de la revue documentaire).
+   */
+  async index(ctx: HttpContext) {
+    const { orgId, role, servicePermissions } = ctx.internalAuth
+    const { status, q, page, perPage } = await ctx.request.validateUsing(listRegistrationsValidator)
+    const { serviceId } = await serviceIdQueryValidator.validate(ctx.request.qs())
+
+    return runOnTenant(serviceId, async () => {
+      const event = await Event.query()
+        .where('id', Number(ctx.params.id))
+        .where('orgId', orgId)
+        .where('serviceId', serviceId)
+        .first()
+      if (!event) return ctx.response.status(404).send({ error: 'event_not_found' })
+
+      if (role !== 'admin' && !servicePermissions?.[String(event.serviceId)]?.canViewHistory) {
+        return ctx.response.status(403).send({ error: 'permission_required' })
+      }
+
+      const query = Registration.query()
+        .where('eventId', event.id)
+        .preload('documents')
+        .orderBy('createdAt', 'desc')
+
+      if (status) query.where('status', status)
+      if (q) {
+        query.where((sub) => {
+          sub
+            .whereILike('email', `%${q}%`)
+            .orWhereILike('firstName', `%${q}%`)
+            .orWhereILike('lastName', `%${q}%`)
+            .orWhereILike('paymentReference', `%${q}%`)
+        })
+      }
+
+      const registrations = await query.paginate(page ?? 1, perPage ?? 25)
+
+      return ctx.response.send({
+        data: registrations.all().map(serializeRegistrationForAgent),
+        meta: registrations.getMeta(),
+      })
+    })
+  }
+
+  /**
+   * GET /registrations/staff — réservé au staff AREGIE : vue par
+   * organisme (orgId obligatoire depuis le split par service) pour le
+   * dashboard, filtrable par service. Fan-out borné aux services
+   * inscription de cet organisme, fusion/tri/pagination en mémoire —
+   * même pattern que staffIndex côté svc-factures/svc-billetterie.
+   */
+  async staffIndex(ctx: HttpContext) {
+    if (ctx.internalAuth.scope !== 'staff') {
+      return ctx.response.status(403).send({ error: 'scope_not_allowed' })
+    }
+
+    const { orgId, serviceId, status, q, dateFrom, dateTo, page, perPage } =
+      await ctx.request.validateUsing(listRegistrationsStaffValidator)
+
+    const candidateServiceIds = serviceId ? [serviceId] : await ensureTenantConnectionsForOrg(orgId)
+
+    const matches: Registration[] = []
+    for (const sid of candidateServiceIds) {
+      const rows = await runOnTenant(sid, () => {
+        const query = Registration.query().where('orgId', orgId).orderBy('createdAt', 'desc')
+        if (status) query.where('status', status)
+        if (q) {
+          query.where((sub) => {
+            sub
+              .whereILike('email', `%${q}%`)
+              .orWhereILike('firstName', `%${q}%`)
+              .orWhereILike('lastName', `%${q}%`)
+              .orWhereILike('paymentReference', `%${q}%`)
+          })
+        }
+        if (dateFrom) query.where('createdAt', '>=', dateFrom.toJSDate())
+        if (dateTo) query.where('createdAt', '<=', dateTo.plus({ days: 1 }).toJSDate())
+        return query
+      })
+      matches.push(...rows)
+    }
+
+    matches.sort((a, b) => b.createdAt.toMillis() - a.createdAt.toMillis())
+
+    const perPageResolved = perPage ?? 25
+    const pageResolved = page ?? 1
+    const start = (pageResolved - 1) * perPageResolved
+    const pageItems = matches.slice(start, start + perPageResolved)
+
+    return ctx.response.send({
+      data: pageItems.map(serializeRegistrationForStaff),
+      meta: {
+        total: matches.length,
+        perPage: perPageResolved,
+        currentPage: pageResolved,
+        lastPage: Math.max(1, Math.ceil(matches.length / perPageResolved)),
+      },
+    })
+  }
+
+  /**
+   * GET /registrations/staff/:id/payment-attempts — réservé au staff
+   * AREGIE. Lu depuis registration_payment_attempts, jamais depuis
+   * svc-gestion (voir échange du 2026-09-03) — le staff obtient déjà
+   * serviceId via staffIndex, pas de fan-out ici.
+   */
+  async paymentAttempts(ctx: HttpContext) {
+    if (ctx.internalAuth.scope !== 'staff') {
+      return ctx.response.status(403).send({ error: 'scope_not_allowed' })
+    }
+
+    const { serviceId } = await paymentAttemptsQueryValidator.validate(ctx.request.qs())
+    const registrationId = Number(ctx.params.id)
+
+    const attempts = await runOnTenant(serviceId, () =>
+      RegistrationPaymentAttempt.query()
+        .where('registrationId', registrationId)
+        .orderBy('createdAt', 'asc')
+    )
+
+    return ctx.response.send({
+      data: attempts.map((a) => ({
+        id: a.id,
+        status: a.status,
+        createdAt: a.createdAt.toISO(),
+        paidAt: a.paidAt?.toISO() ?? null,
+        isRetry: a.isRetry,
+      })),
+    })
+  }
+
+  /**
+   * POST /registrations/:id/review?serviceId= — décision de l'agent sur
+   * les justificatifs déposés (parcours C).
    */
   async review(ctx: HttpContext) {
     const { orgId, role, servicePermissions, serviceIds } = ctx.internalAuth
+    const { serviceId } = await serviceIdQueryValidator.validate(ctx.request.qs())
 
-    const registration = await Registration.query()
-      .where('id', Number(ctx.params.id))
-      .where('orgId', orgId)
-      .first()
-    if (!registration) return ctx.response.status(404).send({ error: 'registration_not_found' })
-
-    if (!serviceIds?.includes(registration.serviceId)) {
+    if (!serviceIds?.includes(serviceId)) {
       return ctx.response.status(403).send({ error: 'service_not_allowed_for_agent' })
-    }
-    if (role !== 'admin' && !servicePermissions?.[String(registration.serviceId)]?.canScan) {
-      return ctx.response.status(403).send({ error: 'permission_required' })
     }
 
     const payload = await ctx.request.validateUsing(reviewRegistrationValidator)
 
-    // 'revert' : annule une décision prise par erreur. Autorisé uniquement
-    // depuis 'awaiting_payment' (aucune session PayFiP ouverte tant que le
-    // citoyen n'a pas cliqué payer, voir payByToken) ou depuis 'confirmed'
-    // pour un évènement gratuit (rien n'a jamais été encaissé) — jamais
-    // depuis 'confirmed' en payant, où un vrai paiement a déjà été capturé
-    // et nécessiterait un remboursement manuel hors périmètre.
-    if (payload.decision === 'revert') {
-      const revertAllowed =
-        registration.status === 'awaiting_payment' ||
-        (registration.status === 'confirmed' && registration.paymentMethod === 'free')
-      if (!revertAllowed) {
-        return ctx.response.status(409).send({ error: 'revert_not_allowed' })
+    return runOnTenant(serviceId, async () => {
+      const registration = await Registration.query()
+        .where('id', Number(ctx.params.id))
+        .where('orgId', orgId)
+        .where('serviceId', serviceId)
+        .first()
+      if (!registration) return ctx.response.status(404).send({ error: 'registration_not_found' })
+
+      if (role !== 'admin' && !servicePermissions?.[String(registration.serviceId)]?.canScan) {
+        return ctx.response.status(403).send({ error: 'permission_required' })
       }
 
-      registration.status = 'awaiting_review'
-      registration.reviewedBy = null
-      registration.reviewedByLabel = null
-      registration.reviewedAt = null
-      await registration.save()
+      // 'revert' : annule une décision prise par erreur. Autorisé uniquement
+      // depuis 'awaiting_payment' (aucune session PayFiP ouverte tant que le
+      // citoyen n'a pas cliqué payer, voir payByToken) ou depuis 'confirmed'
+      // pour un évènement gratuit (rien n'a jamais été encaissé) — jamais
+      // depuis 'confirmed' en payant, où un vrai paiement a déjà été
+      // capturé.
+      if (payload.decision === 'revert') {
+        const revertAllowed =
+          registration.status === 'awaiting_payment' ||
+          (registration.status === 'confirmed' && registration.paymentMethod === 'free')
+        if (!revertAllowed) {
+          return ctx.response.status(409).send({ error: 'revert_not_allowed' })
+        }
+
+        registration.status = 'awaiting_review'
+        registration.reviewedBy = null
+        registration.reviewedByLabel = null
+        registration.reviewedAt = null
+        await registration.save()
+
+        return ctx.response.send({ data: serializeRegistrationForAgent(registration) })
+      }
+
+      if (registration.status !== 'awaiting_review') {
+        return ctx.response.status(409).send({ error: 'registration_not_awaiting_review' })
+      }
+
+      const event = await Event.find(registration.eventId)
+      if (!event) return ctx.response.status(404).send({ error: 'event_not_found' })
+
+      registration.reviewedBy = ctx.internalAuth.sub ? Number(ctx.internalAuth.sub) : null
+      registration.reviewedByLabel = agentLabel(ctx.internalAuth)
+      registration.reviewedAt = DateTime.now()
+
+      if (payload.decision === 'reject' || payload.decision === 'request_more_documents') {
+        registration.status = 'rejected'
+        registration.rejectionReason = payload.rejectionReason ?? null
+        registration.documentDeadlineAt = DateTime.now().plus({ days: DOCUMENT_RESUBMIT_DEADLINE_DAYS })
+        // 'request_more_documents' : les documents déjà déposés restent
+        // valables — seul un vrai 'reject' force à tout redéposer.
+        registration.keepExistingDocuments = payload.decision === 'request_more_documents'
+        await registration.save()
+
+        await sendRegistrationRejectionEmail(registration, event)
+        return ctx.response.send({ data: serializeRegistrationForAgent(registration) })
+      }
+
+      // Approbation : gratuit → confirmé direct ; payant → awaiting_payment,
+      // aucune session PayFiP créée tout de suite.
+      if (registration.priceCentsAtRegistration === 0) {
+        registration.status = 'confirmed'
+        await registration.save()
+        await sendRegistrationConfirmationEmail(registration, event)
+      } else {
+        registration.status = 'awaiting_payment'
+        registration.paymentReference ??= buildPaymentReference(serviceId, registration.id)
+        await registration.save()
+        await sendPaymentRequestEmail(registration, event)
+      }
 
       return ctx.response.send({ data: serializeRegistrationForAgent(registration) })
-    }
-
-    if (registration.status !== 'awaiting_review') {
-      return ctx.response.status(409).send({ error: 'registration_not_awaiting_review' })
-    }
-
-    const event = await Event.find(registration.eventId)
-    if (!event) return ctx.response.status(404).send({ error: 'event_not_found' })
-
-    registration.reviewedBy = ctx.internalAuth.sub ? Number(ctx.internalAuth.sub) : null
-    registration.reviewedByLabel = agentLabel(ctx.internalAuth)
-    registration.reviewedAt = DateTime.now()
-
-    if (payload.decision === 'reject' || payload.decision === 'request_more_documents') {
-      registration.status = 'rejected'
-      registration.rejectionReason = payload.rejectionReason ?? null
-      registration.documentDeadlineAt = DateTime.now().plus({ days: DOCUMENT_RESUBMIT_DEADLINE_DAYS })
-      // 'request_more_documents' : les documents déjà déposés restent
-      // valables (voir replaceDocuments, qui ne les invalide plus dans ce
-      // cas) — seul un vrai 'reject' force à tout redéposer.
-      registration.keepExistingDocuments = payload.decision === 'request_more_documents'
-      await registration.save()
-
-      await sendRegistrationRejectionEmail(registration, event)
-      return ctx.response.send({ data: serializeRegistrationForAgent(registration) })
-    }
-
-    // Approbation : gratuit → confirmé direct ; payant → awaiting_payment,
-    // aucune session PayFiP créée tout de suite (l'email de demande de
-    // paiement pointe vers /pay, voir plan §0 décisions de conception).
-    if (registration.priceCentsAtRegistration === 0) {
-      registration.status = 'confirmed'
-      await registration.save()
-      await sendRegistrationConfirmationEmail(registration, event)
-    } else {
-      registration.status = 'awaiting_payment'
-      registration.paymentReference ??= `INSC${String(registration.id).padStart(8, '0')}`
-      await registration.save()
-      await sendPaymentRequestEmail(registration, event)
-    }
-
-    return ctx.response.send({ data: serializeRegistrationForAgent(registration) })
+    })
   }
 
   /**
-   * POST /registrations/:id/resend-reminder — l'agent renvoie manuellement
-   * l'email déjà attendu par le citoyen (demande de paiement ou redépôt de
-   * justificatif) quand ça traîne — pas une nouvelle décision, juste un
-   * rappel du même contenu.
+   * POST /registrations/:id/resend-reminder?serviceId= — l'agent renvoie
+   * manuellement l'email déjà attendu par le citoyen quand ça traîne.
    */
   async resendReminder(ctx: HttpContext) {
     const { orgId, role, servicePermissions, serviceIds } = ctx.internalAuth
+    const { serviceId } = await serviceIdQueryValidator.validate(ctx.request.qs())
 
-    const registration = await Registration.query()
-      .where('id', Number(ctx.params.id))
-      .where('orgId', orgId)
-      .first()
-    if (!registration) return ctx.response.status(404).send({ error: 'registration_not_found' })
-
-    if (!serviceIds?.includes(registration.serviceId)) {
+    if (!serviceIds?.includes(serviceId)) {
       return ctx.response.status(403).send({ error: 'service_not_allowed_for_agent' })
     }
-    if (role !== 'admin' && !servicePermissions?.[String(registration.serviceId)]?.canScan) {
-      return ctx.response.status(403).send({ error: 'permission_required' })
-    }
 
-    if (registration.status !== 'awaiting_payment' && registration.status !== 'rejected') {
-      return ctx.response.status(409).send({ error: 'nothing_to_resend' })
-    }
+    return runOnTenant(serviceId, async () => {
+      const registration = await Registration.query()
+        .where('id', Number(ctx.params.id))
+        .where('orgId', orgId)
+        .where('serviceId', serviceId)
+        .first()
+      if (!registration) return ctx.response.status(404).send({ error: 'registration_not_found' })
 
-    if (registration.lastReminderSentAt) {
-      const minutesSinceLast = DateTime.now().diff(registration.lastReminderSentAt, 'minutes').minutes
-      if (minutesSinceLast < REMINDER_COOLDOWN_MINUTES) {
-        return ctx.response.status(429).send({
-          error: 'reminder_cooldown',
-          retryAfterMinutes: Math.ceil(REMINDER_COOLDOWN_MINUTES - minutesSinceLast),
-        })
+      if (role !== 'admin' && !servicePermissions?.[String(registration.serviceId)]?.canScan) {
+        return ctx.response.status(403).send({ error: 'permission_required' })
       }
-    }
 
-    const event = await Event.find(registration.eventId)
-    if (!event) return ctx.response.status(404).send({ error: 'event_not_found' })
+      if (registration.status !== 'awaiting_payment' && registration.status !== 'rejected') {
+        return ctx.response.status(409).send({ error: 'nothing_to_resend' })
+      }
 
-    if (registration.status === 'awaiting_payment') {
-      await sendPaymentRequestEmail(registration, event)
-    } else {
-      await sendRegistrationRejectionEmail(registration, event)
-    }
+      if (registration.lastReminderSentAt) {
+        const minutesSinceLast = DateTime.now().diff(registration.lastReminderSentAt, 'minutes').minutes
+        if (minutesSinceLast < REMINDER_COOLDOWN_MINUTES) {
+          return ctx.response.status(429).send({
+            error: 'reminder_cooldown',
+            retryAfterMinutes: Math.ceil(REMINDER_COOLDOWN_MINUTES - minutesSinceLast),
+          })
+        }
+      }
 
-    registration.lastReminderSentAt = DateTime.now()
-    await registration.save()
+      const event = await Event.find(registration.eventId)
+      if (!event) return ctx.response.status(404).send({ error: 'event_not_found' })
 
-    return ctx.response.send({ data: serializeRegistrationForAgent(registration) })
+      if (registration.status === 'awaiting_payment') {
+        await sendPaymentRequestEmail(registration, event)
+      } else {
+        await sendRegistrationRejectionEmail(registration, event)
+      }
+
+      registration.lastReminderSentAt = DateTime.now()
+      await registration.save()
+
+      return ctx.response.send({ data: serializeRegistrationForAgent(registration) })
+    })
   }
 
   /**
-   * GET /registrations/:id/documents/:documentId — stream du blob,
-   * réservé à canScan ou canViewHistory sur le service de l'inscription.
+   * GET /registrations/:id/documents/:documentId?serviceId= — stream du
+   * blob, réservé à canScan ou canViewHistory sur le service de
+   * l'inscription.
    */
   async downloadDocument(ctx: HttpContext) {
     const { orgId, role, servicePermissions, serviceIds } = ctx.internalAuth
+    const { serviceId } = await serviceIdQueryValidator.validate(ctx.request.qs())
 
-    const registration = await Registration.query()
-      .where('id', Number(ctx.params.id))
-      .where('orgId', orgId)
-      .first()
-    if (!registration) return ctx.response.status(404).send({ error: 'registration_not_found' })
-
-    if (!serviceIds?.includes(registration.serviceId)) {
+    if (!serviceIds?.includes(serviceId)) {
       return ctx.response.status(403).send({ error: 'service_not_allowed_for_agent' })
     }
-    const permissions = servicePermissions?.[String(registration.serviceId)]
-    if (role !== 'admin' && !permissions?.canScan && !permissions?.canViewHistory) {
-      return ctx.response.status(403).send({ error: 'permission_required' })
-    }
 
-    const document = await RegistrationDocument.query()
-      .where('id', Number(ctx.params.documentId))
-      .where('registrationId', registration.id)
-      .first()
-    if (!document) return ctx.response.status(404).send({ error: 'document_not_found' })
+    return runOnTenant(serviceId, async () => {
+      const registration = await Registration.query()
+        .where('id', Number(ctx.params.id))
+        .where('orgId', orgId)
+        .where('serviceId', serviceId)
+        .first()
+      if (!registration) return ctx.response.status(404).send({ error: 'registration_not_found' })
 
-    // document.filename vient de file.clientName, fourni par le citoyen à
-    // l'upload — jamais injecté tel quel dans un paramètre de header quoté.
-    const safeFilename = document.filename.replace(/["\\]/g, '_').replace(/[\r\n]/g, '')
-    ctx.response.header('Content-Type', document.mimeType)
-    ctx.response.header('Content-Disposition', `inline; filename="${safeFilename}"`)
-    return ctx.response.send(document.fileData)
+      const permissions = servicePermissions?.[String(registration.serviceId)]
+      if (role !== 'admin' && !permissions?.canScan && !permissions?.canViewHistory) {
+        return ctx.response.status(403).send({ error: 'permission_required' })
+      }
+
+      const document = await RegistrationDocument.query()
+        .where('id', Number(ctx.params.documentId))
+        .where('registrationId', registration.id)
+        .first()
+      if (!document) return ctx.response.status(404).send({ error: 'document_not_found' })
+
+      // document.filename vient de file.clientName, fourni par le citoyen à
+      // l'upload — jamais injecté tel quel dans un paramètre de header quoté.
+      const safeFilename = document.filename.replace(/["\\]/g, '_').replace(/[\r\n]/g, '')
+      ctx.response.header('Content-Type', document.mimeType)
+      ctx.response.header('Content-Disposition', `inline; filename="${safeFilename}"`)
+      return ctx.response.send(document.fileData)
+    })
   }
 }

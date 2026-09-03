@@ -64,6 +64,12 @@ services:
     container_name: svc-billetterie
     restart: unless-stopped
     env_file: ./env/svc-billetterie.env
+    labels:
+      # Tentatives de paiement encore "awaiting_payment" au-delà de la
+      # validité PayFiP (15 min) — voir payment_attempt_expiry_service.ts.
+      ofelia.enabled: "true"
+      ofelia.job-exec.billetterie-payment-attempts-expire.schedule: "@every 5m"
+      ofelia.job-exec.billetterie-payment-attempts-expire.command: "node ace payment-attempts:expire"
     environment:
       # Le conteneur n'a pas de sortie IPv6 fonctionnelle, mais la
       # résolution DNS système renvoie parfois une adresse AAAA en
@@ -89,6 +95,10 @@ services:
     container_name: svc-factures
     restart: unless-stopped
     env_file: ./env/svc-factures.env
+    labels:
+      ofelia.enabled: "true"
+      ofelia.job-exec.factures-payment-attempts-expire.schedule: "@every 5m"
+      ofelia.job-exec.factures-payment-attempts-expire.command: "node ace payment-attempts:expire"
     environment:
       # Le conteneur n'a pas de sortie IPv6 fonctionnelle, mais la
       # résolution DNS système renvoie parfois une adresse AAAA en
@@ -157,6 +167,10 @@ services:
     container_name: svc-inscription
     restart: unless-stopped
     env_file: ./env/svc-inscription.env
+    labels:
+      ofelia.enabled: "true"
+      ofelia.job-exec.inscription-payment-attempts-expire.schedule: "@every 5m"
+      ofelia.job-exec.inscription-payment-attempts-expire.command: "node ace payment-attempts:expire"
     environment:
       # Le conteneur n'a pas de sortie IPv6 fonctionnelle, mais la
       # résolution DNS système renvoie parfois une adresse AAAA en
@@ -175,6 +189,17 @@ services:
       SELF_BASE_URL: http://svc-inscription:3341
     networks:
       - payfip-internal
+
+  ofelia:
+    image: mcuadros/ofelia:latest
+    container_name: ofelia
+    restart: unless-stopped
+    command: daemon --docker
+    volumes:
+      # Lecture seule : Ofelia ne fait que docker exec dans les
+      # conteneurs qui portent ofelia.enabled=true, jamais de gestion du
+      # cycle de vie des conteneurs eux-mêmes.
+      - /var/run/docker.sock:/var/run/docker.sock:ro
 
 networks:
   payfip-internal:

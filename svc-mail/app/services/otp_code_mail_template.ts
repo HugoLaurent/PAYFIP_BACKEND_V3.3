@@ -47,13 +47,13 @@ export function renderOtpCodeEmail(data: OtpCodeEmailData): string {
 
           <tr><td align="center" style="padding:18px 44px 0; font-size:14px; line-height:22px; color:#4f5661;">Nos codes ne contiennent que des chiffres — jamais de lettres, donc aucune confusion possible entre O et 0 ou entre I et 1.</td></tr>
 
-          <tr><td style="padding:24px 32px 0;">
+          <tr><td style="padding:24px 32px 28px;">
             <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#f2f5fb; border-radius:12px;">
               <tr><td style="padding:16px 20px; font-size:13px; line-height:20px; color:#4f5661;">Vous n'avez rien demandé ? Ignorez cet email : sans ce code, aucun paiement ne peut aboutir. Ne le transmettez à personne, même à un agent.</td></tr>
             </table>
           </td></tr>
 
-          <tr><td align="right" style="padding:20px 32px; margin-top:24px; background-color:#f2f5fb; font-size:12px; line-height:19px; color:#7b8189;">Ne répondez pas à ce message.<br><a href="#" style="color:${AREGIE_BLUE}; text-decoration:none;">aregie.fr</a> · Mentions légales</td></tr>
+          <tr><td align="right" style="padding:24px 32px; background-color:#f2f5fb; border-top:1px solid #dee1e7; font-size:12px; line-height:19px; color:#7b8189;">Ne répondez pas à ce message.<br><a href="#" style="color:${AREGIE_BLUE}; text-decoration:none;">aregie.fr</a> · Mentions légales</td></tr>
 
         </table>
       </td>

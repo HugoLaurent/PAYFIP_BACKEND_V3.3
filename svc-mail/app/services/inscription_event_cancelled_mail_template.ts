@@ -17,14 +17,11 @@ export interface InscriptionEventCancelledEmailData {
   logoUrl?: string
 }
 
-// Gris neutre : contrairement au rejet de justificatif, cet email n'attend
-// aucune action du citoyen — seul le bandeau "déjà réglé" reprend le corail
-// des emails qui demandent un contact.
+// Même palette bleu AREGIE que tous les autres templates — plus de rouge
+// nulle part, y compris sur le bandeau "déjà réglé" (uniformité demandée
+// entre tous les emails).
 const AREGIE_BLUE = '#0080c0'
-const GRAY = '#4f5661'
-const GRAY_TINT = '#f2f5fb'
-const CORAL = '#b63613'
-const CORAL_TINT = '#ffebe4'
+const BLUE_TINT = '#e6f3fa'
 const MARINE = '#223499'
 
 export function renderInscriptionEventCancelledEmail(data: InscriptionEventCancelledEmailData): string {
@@ -35,13 +32,13 @@ export function renderInscriptionEventCancelledEmail(data: InscriptionEventCance
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Évènement annulé</title>
 </head>
-<body style="margin:0; padding:0; font-family:'Segoe UI', Roboto, sans-serif; color:#121b29;">
-  <table width="100%" cellpadding="0" cellspacing="0" border="0" style="padding:32px 0;">
+<body style="margin:0; padding:0; background-color:#f2f5fb; font-family:'Segoe UI', Roboto, sans-serif; color:#121b29;">
+  <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#f2f5fb; padding:32px 0;">
     <tr>
       <td align="center">
         <table width="600" cellpadding="0" cellspacing="0" border="0" style="width:600px; background-color:#ffffff; border-radius:16px; overflow:hidden; box-shadow:0 1px 3px rgba(18,27,41,.08);">
 
-          <tr><td height="6" style="height:6px; background-color:${GRAY}; line-height:6px; font-size:0;">&nbsp;</td></tr>
+          <tr><td height="6" style="height:6px; background-color:${AREGIE_BLUE}; line-height:6px; font-size:0;">&nbsp;</td></tr>
 
           ${
             data.logoUrl
@@ -58,7 +55,7 @@ export function renderInscriptionEventCancelledEmail(data: InscriptionEventCance
           <tr><td style="padding:10px 32px 0; text-align:center; font-size:15px; line-height:23px; color:#4f5661;">L'organisme a annulé l'évènement auquel vous étiez inscrit(e). Votre inscription est annulée, aucune action n'est requise de votre part.</td></tr>
 
           <tr><td style="padding:22px 32px 0;">
-            <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:${GRAY_TINT}; border-radius:12px;">
+            <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#f2f5fb; border-radius:12px;">
               <tr><td style="padding:16px 20px;">
                 <div style="font-size:11px; font-weight:600; letter-spacing:1.4px; color:#7b8189;">ÉVÈNEMENT ANNULÉ</div>
                 <div style="padding-top:6px; font-size:20px; font-weight:800; color:#121b29;">${escapeHtml(data.eventTitle)}</div>
@@ -73,21 +70,21 @@ export function renderInscriptionEventCancelledEmail(data: InscriptionEventCance
 
           ${
             data.wasPaid
-              ? `<tr><td style="padding:20px 32px 0;">
-            <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:${CORAL_TINT}; border-radius:12px;">
+              ? `<tr><td style="padding:20px 32px 28px;">
+            <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:${BLUE_TINT}; border-radius:12px;">
               <tr><td style="padding:16px 20px;">
-                <div style="font-size:11px; font-weight:600; letter-spacing:1.4px; color:${CORAL};">MONTANT DÉJÀ RÉGLÉ</div>
-                <div style="padding-top:6px; font-size:20px; font-weight:800; color:${CORAL};">${euros(data.amountCents)} €</div>
+                <div style="font-size:11px; font-weight:600; letter-spacing:1.4px; color:${AREGIE_BLUE};">MONTANT DÉJÀ RÉGLÉ</div>
+                <div style="padding-top:6px; font-size:20px; font-weight:800; color:${AREGIE_BLUE};">${euros(data.amountCents)} €</div>
                 <div style="padding-top:8px; font-size:14px; line-height:21px; color:#4f5661;">Ce montant n'a pas été remboursé automatiquement. Merci de contacter directement ${
                   data.orgName ? `<strong>${escapeHtml(data.orgName)}</strong>` : "l'organisme"
                 } pour convenir d'un remboursement.</div>
               </td></tr>
             </table>
           </td></tr>`
-              : `<tr><td align="center" style="padding:20px 32px 0; font-size:13px; line-height:20px; color:#7b8189;">Aucune somme ne vous sera prélevée pour cette inscription.</td></tr>`
+              : `<tr><td align="center" style="padding:20px 32px 28px; font-size:13px; line-height:20px; color:#7b8189;">Aucune somme ne vous sera prélevée pour cette inscription.</td></tr>`
           }
 
-          <tr><td align="right" style="padding:28px 32px 20px; background-color:#ffffff; margin-top:24px; font-size:12px; line-height:19px; color:#7b8189; text-align:right;">${
+          <tr><td align="right" style="padding:24px 32px; background-color:#f2f5fb; border-top:1px solid #dee1e7; font-size:12px; line-height:19px; color:#7b8189;">${
             data.orgName || data.serviceName
               ? `Cet email vous est envoyé par <strong style="color:${MARINE};">${escapeHtml(data.orgName ?? data.serviceName!)}</strong>. Ne répondez pas à ce message.<br>`
               : 'Ne répondez pas à ce message.<br>'

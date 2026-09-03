@@ -26,7 +26,10 @@ export const retryInvoicePaymentValidator = vine.compile(
 
 export const listInvoicesStaffValidator = vine.compile(
   vine.object({
-    orgId: vine.number().positive().optional(),
+    // Obligatoire depuis le split par service (DB par serviceId) : sans
+    // orgId, staffIndex devrait faire un fan-out sur toutes les bases
+    // factures connues à chaque appel — voir tenant_connection_service.ts.
+    orgId: vine.number().positive(),
     serviceId: vine.number().positive().optional(),
     status: vine.enum(INVOICE_STATUSES).optional(),
     q: vine.string().trim().minLength(1).optional(),

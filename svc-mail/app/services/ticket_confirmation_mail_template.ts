@@ -31,8 +31,8 @@ export function renderTicketConfirmationEmail(data: TicketConfirmationEmailData)
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Réservation confirmée</title>
 </head>
-<body style="margin:0; padding:0; font-family:'Segoe UI', Roboto, sans-serif; color:#121b29;">
-  <table width="100%" cellpadding="0" cellspacing="0" border="0" style="padding:32px 0;">
+<body style="margin:0; padding:0; background-color:#f2f5fb; font-family:'Segoe UI', Roboto, sans-serif; color:#121b29;">
+  <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#f2f5fb; padding:32px 0;">
     <tr>
       <td align="center">
         <table width="600" cellpadding="0" cellspacing="0" border="0" style="width:600px; background-color:#ffffff; border-radius:16px; overflow:hidden; box-shadow:0 1px 3px rgba(18,27,41,.08);">
@@ -87,9 +87,9 @@ export function renderTicketConfirmationEmail(data: TicketConfirmationEmailData)
             </table>
           </td></tr>
 
-          <tr><td align="center" style="padding:24px 32px 0; font-size:13px; line-height:20px; color:#7b8189;">Présentez le QR de chaque billet à l'entrée, imprimé ou sur votre téléphone.<br>En cas de question, communiquez ce numéro de commande à un agent.</td></tr>
+          <tr><td align="center" style="padding:24px 32px 28px; font-size:13px; line-height:20px; color:#7b8189;">Présentez le QR de chaque billet à l'entrée, imprimé ou sur votre téléphone.<br>En cas de question, communiquez ce numéro de commande à un agent.</td></tr>
 
-          <tr><td align="right" style="padding:20px 32px; background-color:#ffffff; margin-top:24px; font-size:12px; line-height:19px; color:#7b8189; text-align:right;">${
+          <tr><td align="right" style="padding:24px 32px; background-color:#f2f5fb; border-top:1px solid #dee1e7; font-size:12px; line-height:19px; color:#7b8189;">${
             data.orgName || data.serviceName
               ? `Cet email vous est envoyé par <strong style="color:${MARINE};">${escapeHtml(data.orgName ?? data.serviceName!)}</strong>. Ne répondez pas à ce message.<br>`
               : 'Ne répondez pas à ce message.<br>'

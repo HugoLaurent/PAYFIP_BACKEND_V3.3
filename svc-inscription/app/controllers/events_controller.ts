@@ -6,6 +6,7 @@ import Registration from '#models/registration'
 import { createEventValidator, updateEventValidator, listEventsAgentValidator } from '#validators/event'
 import { computeSeatsHeld } from '#services/capacity_service'
 import { sendEventCancelledEmail } from '#services/registration_mail_service'
+import { runOnTenant, ensureTenantConnections } from '#services/tenant_connection_service'
 
 const publicListValidator = vine.compile(
   vine.object({
@@ -14,6 +15,18 @@ const publicListValidator = vine.compile(
 )
 
 const publicBySlugValidator = vine.compile(
+  vine.object({
+    serviceId: vine.number().positive(),
+  })
+)
+
+// serviceId requis en query pour toute route agent portant un :id — le
+// slug n'est unique que par (orgId, serviceId) et l'id de l'évènement
+// n'est plus unique globalement depuis le split par service (chaque base
+// tenant a sa propre séquence d'id) : sans lui, impossible de savoir
+// quelle base interroger. L'appelant le connaît toujours déjà (venu de
+// index()/showBySlug(), qui l'exigent tous les deux).
+const serviceIdQueryValidator = vine.compile(
   vine.object({
     serviceId: vine.number().positive(),
   })
@@ -59,6 +72,11 @@ async function serializeEventForAgent(event: Event) {
 
   return {
     id: event.id,
+    // Nécessaire côté front : les routes agent à :id (update/cancel/
+    // destroy, et review/resend-reminder/documents côté inscriptions)
+    // exigent toutes serviceId en query depuis le split par service — le
+    // front le lit ici plutôt que de le redemander à l'utilisateur.
+    serviceId: event.serviceId,
     slug: event.slug,
     type: event.type,
     title: event.title,
@@ -128,58 +146,62 @@ export default class EventsController {
         return ctx.response.status(403).send({ error: 'permission_required' })
       }
 
-      const events = await Event.query()
-        .where('orgId', orgId)
-        .where('serviceId', serviceId)
-        .orderBy('createdAt', 'desc')
+      return runOnTenant(serviceId, async () => {
+        const events = await Event.query()
+          .where('orgId', orgId)
+          .where('serviceId', serviceId)
+          .orderBy('createdAt', 'desc')
 
-      // Nombre d'inscriptions en attente de vérification par évènement —
-      // seul indicateur (avec la cloche de notification) qu'une action est
-      // requise, pour qu'il n'ait pas à ouvrir chaque évènement pour le
-      // découvrir.
-      const eventIds = events.map((e) => e.id)
-      const pendingRows =
-        eventIds.length > 0
-          ? await Registration.query()
-              .whereIn('eventId', eventIds)
-              .where('status', 'awaiting_review')
-              .groupBy('eventId')
-              .count('* as total')
-              .select('eventId')
-          : []
-      const pendingByEvent = new Map(pendingRows.map((r) => [r.eventId, Number(r.$extras.total)]))
+        // Nombre d'inscriptions en attente de vérification par évènement —
+        // seul indicateur (avec la cloche de notification) qu'une action est
+        // requise, pour qu'il n'ait pas à ouvrir chaque évènement pour le
+        // découvrir.
+        const eventIds = events.map((e) => e.id)
+        const pendingRows =
+          eventIds.length > 0
+            ? await Registration.query()
+                .whereIn('eventId', eventIds)
+                .where('status', 'awaiting_review')
+                .groupBy('eventId')
+                .count('* as total')
+                .select('eventId')
+            : []
+        const pendingByEvent = new Map(pendingRows.map((r) => [r.eventId, Number(r.$extras.total)]))
 
-      return ctx.response.send({
-        data: await Promise.all(
-          events.map(async (e) => ({
-            ...(await serializeEventForAgent(e)),
-            pendingReviewCount: pendingByEvent.get(e.id) ?? 0,
-          }))
-        ),
+        return ctx.response.send({
+          data: await Promise.all(
+            events.map(async (e) => ({
+              ...(await serializeEventForAgent(e)),
+              pendingReviewCount: pendingByEvent.get(e.id) ?? 0,
+            }))
+          ),
+        })
       })
     }
 
     const { serviceId } = await publicListValidator.validate(ctx.request.qs())
 
-    const events = await Event.query()
-      .where('orgId', orgId)
-      .where('serviceId', serviceId)
-      .where('status', 'published')
-      .where((sub) => {
-        sub.whereNull('registrationDeadline').orWhere('registrationDeadline', '>=', DateTime.now().toSQL()!)
-      })
-      .orderBy('eventDate', 'asc')
+    return runOnTenant(serviceId, async () => {
+      const events = await Event.query()
+        .where('orgId', orgId)
+        .where('serviceId', serviceId)
+        .where('status', 'published')
+        .where((sub) => {
+          sub.whereNull('registrationDeadline').orWhere('registrationDeadline', '>=', DateTime.now().toSQL()!)
+        })
+        .orderBy('eventDate', 'asc')
 
-    return ctx.response.send({ data: await Promise.all(events.map(serializeEventForCitizen)) })
+      return ctx.response.send({ data: await Promise.all(events.map(serializeEventForCitizen)) })
+    })
   }
 
   /**
    * GET /events/pending-review-count — total (tous évènements/services
    * confondus, parmi ceux accessibles à l'agent) d'inscriptions
    * `awaiting_review`, avec le détail par évènement (id/titre/service) pour
-   * que le menu de la cloche de notification (NotificationBell.tsx) puisse
-   * emmener directement au bon évènement plutôt que renvoyer vers la liste
-   * des services à l'aveugle.
+   * que le menu de la cloche de notification puisse emmener directement au
+   * bon évènement. `serviceIds` du JWT est un tableau borné (les services de
+   * l'agent) : fan-out direct dessus, jamais l'annuaire entier.
    */
   async pendingReviewCount(ctx: HttpContext) {
     const { orgId, serviceIds } = ctx.internalAuth
@@ -187,61 +209,80 @@ export default class EventsController {
       return ctx.response.send({ data: { count: 0, events: [] } })
     }
 
-    const rows = await Registration.query()
-      .where('orgId', orgId)
-      .whereIn('serviceId', serviceIds)
-      .where('status', 'awaiting_review')
-      .groupBy('eventId')
-      .count('* as total')
-      .select('eventId')
+    // serviceIds du JWT est tous types de service confondus (billetterie
+    // ET inscription possibles pour le même agent) — ensureTenantConnections
+    // ignore silencieusement ceux qui ne sont pas des services inscription.
+    const inscriptionServiceIds = await ensureTenantConnections(serviceIds)
 
-    const eventIds = rows.map((r) => r.eventId)
-    const events =
-      eventIds.length > 0 ? await Event.query().whereIn('id', eventIds).orderBy('eventDate', 'asc') : []
-    const eventById = new Map(events.map((e) => [e.id, e]))
+    const perService = await Promise.all(
+      inscriptionServiceIds.map((serviceId) =>
+        runOnTenant(serviceId, async () => {
+          const rows = await Registration.query()
+            .where('orgId', orgId)
+            .where('serviceId', serviceId)
+            .where('status', 'awaiting_review')
+            .groupBy('eventId')
+            .count('* as total')
+            .select('eventId')
 
-    const breakdown = rows
-      .map((r) => {
-        const event = eventById.get(r.eventId)
-        if (!event) return null
-        return {
-          eventId: event.id,
-          eventTitle: event.title,
-          serviceId: event.serviceId,
-          count: Number(r.$extras.total),
-        }
-      })
-      .filter((r): r is NonNullable<typeof r> => r !== null)
+          const eventIds = rows.map((r) => r.eventId)
+          const events =
+            eventIds.length > 0
+              ? await Event.query().whereIn('id', eventIds).orderBy('eventDate', 'asc')
+              : []
+          const eventById = new Map(events.map((e) => [e.id, e]))
 
+          return rows
+            .map((r) => {
+              const event = eventById.get(r.eventId)
+              if (!event) return null
+              return {
+                eventId: event.id,
+                eventTitle: event.title,
+                serviceId: event.serviceId,
+                count: Number(r.$extras.total),
+              }
+            })
+            .filter((r): r is NonNullable<typeof r> => r !== null)
+        })
+      )
+    )
+
+    const breakdown = perService.flat()
     const count = breakdown.reduce((sum, r) => sum + r.count, 0)
 
     return ctx.response.send({ data: { count, events: breakdown } })
   }
 
   /**
-   * GET /events/:id — public si l'évènement est `published`, sinon
-   * réservé à un agent avec `canManageTariffs` sur son service (aperçu
-   * d'un évènement en brouillon avant publication). Utilisé côté agent
-   * (id numérique connu depuis la liste de gestion) ; côté citoyen, voir
-   * showBySlug.
+   * GET /events/:id?serviceId= — public si l'évènement est `published`,
+   * sinon réservé à un agent avec `canManageTariffs` sur son service
+   * (aperçu d'un évènement en brouillon avant publication).
    */
   async show(ctx: HttpContext) {
     const { orgId, role, servicePermissions } = ctx.internalAuth
+    const { serviceId } = await serviceIdQueryValidator.validate(ctx.request.qs())
 
-    const event = await Event.query().where('id', Number(ctx.params.id)).where('orgId', orgId).first()
-    if (!event) {
-      return ctx.response.status(404).send({ error: 'event_not_found' })
-    }
-
-    if (event.status !== 'published') {
-      const canManage = role === 'admin' || servicePermissions?.[String(event.serviceId)]?.canManageTariffs
-      if (!canManage) {
+    return runOnTenant(serviceId, async () => {
+      const event = await Event.query()
+        .where('id', Number(ctx.params.id))
+        .where('orgId', orgId)
+        .where('serviceId', serviceId)
+        .first()
+      if (!event) {
         return ctx.response.status(404).send({ error: 'event_not_found' })
       }
-      return ctx.response.send({ data: await serializeEventForAgent(event) })
-    }
 
-    return ctx.response.send({ data: await serializeEventForCitizen(event) })
+      if (event.status !== 'published') {
+        const canManage = role === 'admin' || servicePermissions?.[String(event.serviceId)]?.canManageTariffs
+        if (!canManage) {
+          return ctx.response.status(404).send({ error: 'event_not_found' })
+        }
+        return ctx.response.send({ data: await serializeEventForAgent(event) })
+      }
+
+      return ctx.response.send({ data: await serializeEventForCitizen(event) })
+    })
   }
 
   /**
@@ -253,17 +294,19 @@ export default class EventsController {
     const { orgId } = ctx.internalAuth
     const { serviceId } = await publicBySlugValidator.validate(ctx.request.qs())
 
-    const event = await Event.query()
-      .where('slug', ctx.params.slug)
-      .where('orgId', orgId)
-      .where('serviceId', serviceId)
-      .where('status', 'published')
-      .first()
-    if (!event) {
-      return ctx.response.status(404).send({ error: 'event_not_found' })
-    }
+    return runOnTenant(serviceId, async () => {
+      const event = await Event.query()
+        .where('slug', ctx.params.slug)
+        .where('orgId', orgId)
+        .where('serviceId', serviceId)
+        .where('status', 'published')
+        .first()
+      if (!event) {
+        return ctx.response.status(404).send({ error: 'event_not_found' })
+      }
 
-    return ctx.response.send({ data: await serializeEventForCitizen(event) })
+      return ctx.response.send({ data: await serializeEventForCitizen(event) })
+    })
   }
 
   /**
@@ -283,204 +326,214 @@ export default class EventsController {
 
     const payload = await ctx.request.validateUsing(createEventValidator)
 
-    if (payload.slug) {
-      const collision = await Event.query()
-        .where('orgId', orgId)
-        .where('serviceId', serviceId)
-        .where('slug', payload.slug)
-        .first()
-      if (collision) return ctx.response.status(409).send({ error: 'slug_already_used' })
-    }
-    const slug = payload.slug ?? (await resolveUniqueSlug(Number(orgId), serviceId, payload.title))
+    return runOnTenant(serviceId, async () => {
+      if (payload.slug) {
+        const collision = await Event.query()
+          .where('orgId', orgId)
+          .where('serviceId', serviceId)
+          .where('slug', payload.slug)
+          .first()
+        if (collision) return ctx.response.status(409).send({ error: 'slug_already_used' })
+      }
+      const slug = payload.slug ?? (await resolveUniqueSlug(Number(orgId), serviceId, payload.title))
 
-    const event = await Event.create({
-      orgId: Number(orgId),
-      serviceId,
-      type: payload.type,
-      slug,
-      title: payload.title,
-      description: payload.description ?? null,
-      eventDate: payload.eventDate ?? null,
-      startTime: payload.startTime ?? null,
-      endTime: payload.endTime ?? null,
-      timeLabel: payload.timeLabel ?? null,
-      location: payload.location ?? null,
-      category: payload.category ?? null,
-      registrationDeadline: payload.registrationDeadline ?? null,
-      priceCents: payload.priceCents,
-      documentRequirements: payload.documentRequirements ?? null,
-      capacity: payload.capacity ?? null,
-      maxParticipantsPerRegistration: payload.maxParticipantsPerRegistration ?? 1,
-      formSchema: payload.formSchema ?? null,
-      status: payload.status ?? 'draft',
+      const event = await Event.create({
+        orgId: Number(orgId),
+        serviceId,
+        type: payload.type,
+        slug,
+        title: payload.title,
+        description: payload.description ?? null,
+        eventDate: payload.eventDate ?? null,
+        startTime: payload.startTime ?? null,
+        endTime: payload.endTime ?? null,
+        timeLabel: payload.timeLabel ?? null,
+        location: payload.location ?? null,
+        category: payload.category ?? null,
+        registrationDeadline: payload.registrationDeadline ?? null,
+        priceCents: payload.priceCents,
+        documentRequirements: payload.documentRequirements ?? null,
+        capacity: payload.capacity ?? null,
+        maxParticipantsPerRegistration: payload.maxParticipantsPerRegistration ?? 1,
+        formSchema: payload.formSchema ?? null,
+        status: payload.status ?? 'draft',
+      })
+
+      return ctx.response.status(201).send({ data: await serializeEventForAgent(event) })
     })
-
-    return ctx.response.status(201).send({ data: await serializeEventForAgent(event) })
   }
 
   /**
-   * PATCH /events/:id — mise à jour partielle (voir updateEventValidator :
-   * null retire un champ optionnel, undefined ne le touche pas). Le slug
-   * n'est modifiable qu'explicitement (jamais recalculé depuis `title`).
+   * PATCH /events/:id?serviceId= — mise à jour partielle (voir
+   * updateEventValidator : null retire un champ optionnel, undefined ne le
+   * touche pas). Le slug n'est modifiable qu'explicitement (jamais
+   * recalculé depuis `title`).
    */
   async update(ctx: HttpContext) {
     const { orgId, role, servicePermissions, serviceIds } = ctx.internalAuth
+    const { serviceId } = await serviceIdQueryValidator.validate(ctx.request.qs())
 
-    const event = await Event.query().where('id', Number(ctx.params.id)).where('orgId', orgId).first()
-    if (!event) {
-      return ctx.response.status(404).send({ error: 'event_not_found' })
-    }
-
-    if (!serviceIds?.includes(event.serviceId)) {
+    if (!serviceIds?.includes(serviceId)) {
       return ctx.response.status(403).send({ error: 'service_not_allowed_for_agent' })
     }
-    if (role !== 'admin' && !servicePermissions?.[String(event.serviceId)]?.canManageTariffs) {
+    if (role !== 'admin' && !servicePermissions?.[String(serviceId)]?.canManageTariffs) {
       return ctx.response.status(403).send({ error: 'permission_required' })
     }
 
     const payload = await ctx.request.validateUsing(updateEventValidator)
 
-    // 'cancelled' ne se pose jamais via ce PATCH générique — seulement via
-    // POST /events/:id/cancel, qui bascule aussi les inscriptions actives
-    // et envoie l'email d'annulation (voir #cancel plus bas).
-    if (payload.status === 'cancelled') {
-      return ctx.response.status(422).send({ error: 'use_cancel_endpoint' })
-    }
-
-    if (payload.slug !== undefined && payload.slug !== event.slug) {
-      const collision = await Event.query()
+    return runOnTenant(serviceId, async () => {
+      const event = await Event.query()
+        .where('id', Number(ctx.params.id))
         .where('orgId', orgId)
-        .where('serviceId', event.serviceId)
-        .where('slug', payload.slug)
-        .whereNot('id', event.id)
+        .where('serviceId', serviceId)
         .first()
-      if (collision) return ctx.response.status(409).send({ error: 'slug_already_used' })
-      event.slug = payload.slug
-    }
-    if (payload.type !== undefined) event.type = payload.type
-    if (payload.title !== undefined) event.title = payload.title
-    if (payload.description !== undefined) event.description = payload.description
-    if (payload.eventDate !== undefined) event.eventDate = payload.eventDate
-    if (payload.startTime !== undefined) event.startTime = payload.startTime
-    if (payload.endTime !== undefined) event.endTime = payload.endTime
-    if (payload.timeLabel !== undefined) event.timeLabel = payload.timeLabel
-    if (payload.location !== undefined) event.location = payload.location
-    if (payload.category !== undefined) event.category = payload.category
-    if (payload.registrationDeadline !== undefined) event.registrationDeadline = payload.registrationDeadline
-    if (payload.priceCents !== undefined) event.priceCents = payload.priceCents
-    if (payload.documentRequirements !== undefined) event.documentRequirements = payload.documentRequirements
-    if (payload.capacity !== undefined) event.capacity = payload.capacity
-    if (payload.maxParticipantsPerRegistration !== undefined) {
-      event.maxParticipantsPerRegistration = payload.maxParticipantsPerRegistration
-    }
-    if (payload.formSchema !== undefined) event.formSchema = payload.formSchema
-    if (payload.status !== undefined) event.status = payload.status
+      if (!event) {
+        return ctx.response.status(404).send({ error: 'event_not_found' })
+      }
 
-    await event.save()
+      // 'cancelled' ne se pose jamais via ce PATCH générique — seulement via
+      // POST /events/:id/cancel, qui bascule aussi les inscriptions actives
+      // et envoie l'email d'annulation (voir #cancel plus bas).
+      if (payload.status === 'cancelled') {
+        return ctx.response.status(422).send({ error: 'use_cancel_endpoint' })
+      }
 
-    return ctx.response.send({ data: await serializeEventForAgent(event) })
+      if (payload.slug !== undefined && payload.slug !== event.slug) {
+        const collision = await Event.query()
+          .where('orgId', orgId)
+          .where('serviceId', event.serviceId)
+          .where('slug', payload.slug)
+          .whereNot('id', event.id)
+          .first()
+        if (collision) return ctx.response.status(409).send({ error: 'slug_already_used' })
+        event.slug = payload.slug
+      }
+      if (payload.type !== undefined) event.type = payload.type
+      if (payload.title !== undefined) event.title = payload.title
+      if (payload.description !== undefined) event.description = payload.description
+      if (payload.eventDate !== undefined) event.eventDate = payload.eventDate
+      if (payload.startTime !== undefined) event.startTime = payload.startTime
+      if (payload.endTime !== undefined) event.endTime = payload.endTime
+      if (payload.timeLabel !== undefined) event.timeLabel = payload.timeLabel
+      if (payload.location !== undefined) event.location = payload.location
+      if (payload.category !== undefined) event.category = payload.category
+      if (payload.registrationDeadline !== undefined) event.registrationDeadline = payload.registrationDeadline
+      if (payload.priceCents !== undefined) event.priceCents = payload.priceCents
+      if (payload.documentRequirements !== undefined) event.documentRequirements = payload.documentRequirements
+      if (payload.capacity !== undefined) event.capacity = payload.capacity
+      if (payload.maxParticipantsPerRegistration !== undefined) {
+        event.maxParticipantsPerRegistration = payload.maxParticipantsPerRegistration
+      }
+      if (payload.formSchema !== undefined) event.formSchema = payload.formSchema
+      if (payload.status !== undefined) event.status = payload.status
+
+      await event.save()
+
+      return ctx.response.send({ data: await serializeEventForAgent(event) })
+    })
   }
 
   /**
-   * POST /events/:id/cancel — l'agent annule un évènement encore actif
-   * (draft/published/closed) : bascule l'évènement et toutes ses
-   * inscriptions non terminales en `cancelled`, et envoie à chacune un
-   * email d'annulation (invitant à contacter l'organisme en cas de
-   * paiement déjà encaissé — aucun remboursement n'est déclenché
-   * automatiquement, voir registration_mail_service.ts). Ne supprime
-   * aucune ligne : l'historique des inscriptions/paiements reste
-   * consultable, contrairement à `destroy`.
+   * POST /events/:id/cancel?serviceId= — l'agent annule un évènement
+   * encore actif (draft/published/closed) : bascule l'évènement et toutes
+   * ses inscriptions non terminales en `cancelled`, et envoie à chacune un
+   * email d'annulation. Ne supprime aucune ligne.
    */
   async cancel(ctx: HttpContext) {
     const { orgId, role, servicePermissions, serviceIds } = ctx.internalAuth
+    const { serviceId } = await serviceIdQueryValidator.validate(ctx.request.qs())
 
-    const event = await Event.query().where('id', Number(ctx.params.id)).where('orgId', orgId).first()
-    if (!event) {
-      return ctx.response.status(404).send({ error: 'event_not_found' })
-    }
-
-    if (!serviceIds?.includes(event.serviceId)) {
+    if (!serviceIds?.includes(serviceId)) {
       return ctx.response.status(403).send({ error: 'service_not_allowed_for_agent' })
     }
-    if (role !== 'admin' && !servicePermissions?.[String(event.serviceId)]?.canManageTariffs) {
+    if (role !== 'admin' && !servicePermissions?.[String(serviceId)]?.canManageTariffs) {
       return ctx.response.status(403).send({ error: 'permission_required' })
     }
 
-    if (event.status === 'cancelled' || event.status === 'archived') {
-      return ctx.response.status(409).send({ error: 'event_already_terminal' })
-    }
+    return runOnTenant(serviceId, async () => {
+      const event = await Event.query()
+        .where('id', Number(ctx.params.id))
+        .where('orgId', orgId)
+        .where('serviceId', serviceId)
+        .first()
+      if (!event) {
+        return ctx.response.status(404).send({ error: 'event_not_found' })
+      }
 
-    event.status = 'cancelled'
-    await event.save()
+      if (event.status === 'cancelled' || event.status === 'archived') {
+        return ctx.response.status(409).send({ error: 'event_already_terminal' })
+      }
 
-    const registrations = await Registration.query()
-      .where('eventId', event.id)
-      .whereNotIn('status', ['cancelled', 'expired'])
+      event.status = 'cancelled'
+      await event.save()
 
-    let notifiedCount = 0
-    for (const registration of registrations) {
-      const wasPaid = registration.status === 'confirmed' && registration.priceCentsAtRegistration > 0
+      const registrations = await Registration.query()
+        .where('eventId', event.id)
+        .whereNotIn('status', ['cancelled', 'expired'])
 
-      registration.status = 'cancelled'
-      registration.cancelledAt = DateTime.now()
-      // payfipIdOp survivrait sinon d'une session PayFiP passée (réussie ou
-      // non) et ferait passer canRetryPayment à true côté citoyen — il n'y
-      // a plus rien à (re)payer, l'évènement n'existe plus (voir
-      // registrations_controller.ts#retryPayment).
-      registration.payfipIdOp = null
-      await registration.save()
+      let notifiedCount = 0
+      for (const registration of registrations) {
+        const wasPaid = registration.status === 'confirmed' && registration.priceCentsAtRegistration > 0
 
-      await sendEventCancelledEmail(registration, event, wasPaid)
-      notifiedCount += 1
-    }
+        registration.status = 'cancelled'
+        registration.cancelledAt = DateTime.now()
+        // payfipIdOp survivrait sinon d'une session PayFiP passée (réussie ou
+        // non) et ferait passer canRetryPayment à true côté citoyen — il n'y
+        // a plus rien à (re)payer, l'évènement n'existe plus.
+        registration.payfipIdOp = null
+        await registration.save()
 
-    return ctx.response.send({ data: await serializeEventForAgent(event), notifiedCount })
+        await sendEventCancelledEmail(registration, event, wasPaid)
+        notifiedCount += 1
+      }
+
+      return ctx.response.send({ data: await serializeEventForAgent(event), notifiedCount })
+    })
   }
 
   /**
-   * DELETE /events/:id — suppression définitive. Autorisée pour un
-   * évènement `archived`, `cancelled` (voir #cancel), ou dont la date est
-   * déjà passée — jamais un évènement encore à venir et non traité qui
-   * pourrait avoir des inscrits en attente. Les inscriptions existantes
-   * gardent leur propre copie du prix (priceCentsAtRegistration) mais
-   * référencent toujours eventId : voir la contrainte FK sans CASCADE sur
-   * `registrations.event_id`, qui refusera la suppression tant qu'il
-   * existe la moindre inscription (même terminale) pour cet évènement —
-   * cohérent avec "jamais une cascade silencieuse" (voir migration) : un
-   * évènement passé avec des inscrits reste consultable en base tant que
-   * l'agent ne veut pas en purger l'historique manuellement.
+   * DELETE /events/:id?serviceId= — suppression définitive. Autorisée pour
+   * un évènement `archived`, `cancelled`, ou dont la date est déjà passée.
    */
   async destroy(ctx: HttpContext) {
     const { orgId, role, servicePermissions, serviceIds } = ctx.internalAuth
+    const { serviceId } = await serviceIdQueryValidator.validate(ctx.request.qs())
 
-    const event = await Event.query().where('id', Number(ctx.params.id)).where('orgId', orgId).first()
-    if (!event) {
-      return ctx.response.status(404).send({ error: 'event_not_found' })
-    }
-
-    if (!serviceIds?.includes(event.serviceId)) {
+    if (!serviceIds?.includes(serviceId)) {
       return ctx.response.status(403).send({ error: 'service_not_allowed_for_agent' })
     }
-    if (role !== 'admin' && !servicePermissions?.[String(event.serviceId)]?.canManageTariffs) {
+    if (role !== 'admin' && !servicePermissions?.[String(serviceId)]?.canManageTariffs) {
       return ctx.response.status(403).send({ error: 'permission_required' })
     }
 
-    const eventIsPast = event.eventDate !== null && event.eventDate < DateTime.now().startOf('day')
-    const isDeletableStatus = event.status === 'archived' || event.status === 'cancelled'
-    if (!isDeletableStatus && !eventIsPast) {
-      return ctx.response.status(409).send({ error: 'event_must_be_archived_first' })
-    }
+    return runOnTenant(serviceId, async () => {
+      const event = await Event.query()
+        .where('id', Number(ctx.params.id))
+        .where('orgId', orgId)
+        .where('serviceId', serviceId)
+        .first()
+      if (!event) {
+        return ctx.response.status(404).send({ error: 'event_not_found' })
+      }
 
-    // La FK registrations.event_id n'a pas de CASCADE (voir migration) —
-    // vérifié ici pour renvoyer une erreur métier claire plutôt que de
-    // laisser Postgres rejeter la requête avec une contrainte violée.
-    const hasRegistrations = await Registration.query().where('eventId', event.id).first()
-    if (hasRegistrations) {
-      return ctx.response.status(409).send({ error: 'event_has_registrations' })
-    }
+      const eventIsPast = event.eventDate !== null && event.eventDate < DateTime.now().startOf('day')
+      const isDeletableStatus = event.status === 'archived' || event.status === 'cancelled'
+      if (!isDeletableStatus && !eventIsPast) {
+        return ctx.response.status(409).send({ error: 'event_must_be_archived_first' })
+      }
 
-    await event.delete()
+      // La FK registrations.event_id n'a pas de CASCADE (voir migration) —
+      // vérifié ici pour renvoyer une erreur métier claire plutôt que de
+      // laisser Postgres rejeter la requête avec une contrainte violée.
+      const hasRegistrations = await Registration.query().where('eventId', event.id).first()
+      if (hasRegistrations) {
+        return ctx.response.status(409).send({ error: 'event_has_registrations' })
+      }
 
-    return ctx.response.status(204).send('')
+      await event.delete()
+
+      return ctx.response.status(204).send('')
+    })
   }
 }

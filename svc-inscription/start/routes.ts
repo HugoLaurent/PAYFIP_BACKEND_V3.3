@@ -62,6 +62,11 @@ router
     router.post('/payment-webhooks', [RegistrationsController, 'paymentWebhook'])
 
     router.get('/events/:id/registrations', [RegistrationsController, 'index'])
+    router.get('/registrations/staff', [RegistrationsController, 'staffIndex'])
+    router.get('/registrations/staff/:id/payment-attempts', [
+      RegistrationsController,
+      'paymentAttempts',
+    ])
     router.post('/registrations/:id/review', [RegistrationsController, 'review'])
     router.post('/registrations/:id/resend-reminder', [RegistrationsController, 'resendReminder'])
     router.get('/registrations/:id/documents/:documentId', [

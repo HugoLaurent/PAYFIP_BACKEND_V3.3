@@ -23,5 +23,7 @@ router
   .group(() => {
     router.post('/emails', [EmailsController, 'send'])
     router.get('/emails/staff', [StaffController, 'index'])
+    router.get('/emails/staff/:id', [StaffController, 'show'])
+    router.get('/emails/example', [StaffController, 'example'])
   })
   .use(middleware.internalAuth())

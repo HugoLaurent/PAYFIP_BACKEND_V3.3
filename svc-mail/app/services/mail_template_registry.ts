@@ -44,7 +44,7 @@ const ticketConfirmationValidator = vine.compile(
     // en-tête générique plutôt que d'échouer.
     serviceName: vine.string().trim().optional(),
     orgName: vine.string().trim().optional(),
-    logoUrl: vine.string().trim().url().optional(),
+    logoUrl: vine.string().trim().url({ require_tld: false }).optional(),
   })
 )
 
@@ -56,7 +56,7 @@ const invoiceConfirmationValidator = vine.compile(
     clientNumber: vine.string().trim().optional(),
     serviceName: vine.string().trim().optional(),
     orgName: vine.string().trim().optional(),
-    logoUrl: vine.string().trim().url().optional(),
+    logoUrl: vine.string().trim().url({ require_tld: false }).optional(),
   })
 )
 
@@ -71,7 +71,7 @@ const inscriptionConfirmationValidator = vine.compile(
     registrationNumber: vine.string().trim().minLength(1),
     serviceName: vine.string().trim().optional(),
     orgName: vine.string().trim().optional(),
-    logoUrl: vine.string().trim().url().optional(),
+    logoUrl: vine.string().trim().url({ require_tld: false }).optional(),
   })
 )
 
@@ -85,7 +85,7 @@ const inscriptionPaymentRequestValidator = vine.compile(
     payUrl: vine.string().trim().url(),
     serviceName: vine.string().trim().optional(),
     orgName: vine.string().trim().optional(),
-    logoUrl: vine.string().trim().url().optional(),
+    logoUrl: vine.string().trim().url({ require_tld: false }).optional(),
   })
 )
 
@@ -98,7 +98,7 @@ const inscriptionRegistrationRejectedValidator = vine.compile(
     redepositUrl: vine.string().trim().url(),
     serviceName: vine.string().trim().optional(),
     orgName: vine.string().trim().optional(),
-    logoUrl: vine.string().trim().url().optional(),
+    logoUrl: vine.string().trim().url({ require_tld: false }).optional(),
   })
 )
 
@@ -110,7 +110,7 @@ const inscriptionWaitlistOfferValidator = vine.compile(
     confirmUrl: vine.string().trim().url(),
     serviceName: vine.string().trim().optional(),
     orgName: vine.string().trim().optional(),
-    logoUrl: vine.string().trim().url().optional(),
+    logoUrl: vine.string().trim().url({ require_tld: false }).optional(),
   })
 )
 
@@ -123,7 +123,7 @@ const inscriptionEventCancelledValidator = vine.compile(
     amountCents: vine.number().min(0),
     serviceName: vine.string().trim().optional(),
     orgName: vine.string().trim().optional(),
-    logoUrl: vine.string().trim().url().optional(),
+    logoUrl: vine.string().trim().url({ require_tld: false }).optional(),
   })
 )
 
@@ -134,7 +134,7 @@ const inscriptionAgentReviewNeededValidator = vine.compile(
     registrantName: vine.string().trim().minLength(1),
     serviceName: vine.string().trim().optional(),
     orgName: vine.string().trim().optional(),
-    logoUrl: vine.string().trim().url().optional(),
+    logoUrl: vine.string().trim().url({ require_tld: false }).optional(),
   })
 )
 

@@ -16,11 +16,10 @@ export interface InscriptionRegistrationRejectedEmailData {
   logoUrl?: string
 }
 
-// Corail réservé au bouton d'action — cet email attend une action du
-// citoyen (redéposer un justificatif) avant une date limite.
+// Même palette bleu AREGIE que tous les autres templates — plus de rouge
+// nulle part (uniformité demandée entre tous les emails).
 const AREGIE_BLUE = '#0080c0'
-const CORAL = '#b63613'
-const CORAL_TINT = '#ffebe4'
+const BLUE_TINT = '#e6f3fa'
 const MARINE = '#223499'
 
 export function renderInscriptionRegistrationRejectedEmail(
@@ -33,13 +32,13 @@ export function renderInscriptionRegistrationRejectedEmail(
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Justificatif à compléter</title>
 </head>
-<body style="margin:0; padding:0; font-family:'Segoe UI', Roboto, sans-serif; color:#121b29;">
-  <table width="100%" cellpadding="0" cellspacing="0" border="0" style="padding:32px 0;">
+<body style="margin:0; padding:0; background-color:#f2f5fb; font-family:'Segoe UI', Roboto, sans-serif; color:#121b29;">
+  <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#f2f5fb; padding:32px 0;">
     <tr>
       <td align="center">
         <table width="600" cellpadding="0" cellspacing="0" border="0" style="width:600px; background-color:#ffffff; border-radius:16px; overflow:hidden; box-shadow:0 1px 3px rgba(18,27,41,.08);">
 
-          <tr><td height="6" style="height:6px; background-color:${CORAL}; line-height:6px; font-size:0;">&nbsp;</td></tr>
+          <tr><td height="6" style="height:6px; background-color:${AREGIE_BLUE}; line-height:6px; font-size:0;">&nbsp;</td></tr>
 
           ${
             data.logoUrl
@@ -65,10 +64,10 @@ export function renderInscriptionRegistrationRejectedEmail(
           </td></tr>
 
           <tr><td style="padding:20px 32px 0;">
-            <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:${CORAL_TINT}; border-radius:12px;">
+            <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:${BLUE_TINT}; border-radius:12px;">
               <tr><td style="padding:16px 20px;">
-                <div style="font-size:11px; font-weight:600; letter-spacing:1.4px; color:${CORAL};">DATE LIMITE DE RE-DÉPÔT</div>
-                <div style="padding-top:6px; font-size:20px; font-weight:800; color:${CORAL};">${escapeHtml(data.documentDeadlineAt)}</div>
+                <div style="font-size:11px; font-weight:600; letter-spacing:1.4px; color:${AREGIE_BLUE};">DATE LIMITE DE RE-DÉPÔT</div>
+                <div style="padding-top:6px; font-size:20px; font-weight:800; color:${AREGIE_BLUE};">${escapeHtml(data.documentDeadlineAt)}</div>
               </td></tr>
             </table>
           </td></tr>
@@ -76,16 +75,16 @@ export function renderInscriptionRegistrationRejectedEmail(
           <tr><td align="center" style="padding:28px 32px 0;">
             <table cellpadding="0" cellspacing="0" border="0">
               <tr>
-                <td align="center" style="border-radius:10px; background-color:${CORAL};">
+                <td align="center" style="border-radius:10px; background-color:${MARINE};">
                   <a href="${escapeHtml(data.redepositUrl)}" style="display:inline-block; padding:14px 32px; font-size:15px; font-weight:700; color:#ffffff; text-decoration:none;">Déposer un nouveau document</a>
                 </td>
               </tr>
             </table>
           </td></tr>
 
-          <tr><td align="center" style="padding:20px 32px 0; font-size:13px; line-height:20px; color:#7b8189;">Sans nouveau dépôt avant la date limite, votre place sera libérée et proposée à une autre personne.</td></tr>
+          <tr><td align="center" style="padding:20px 32px 28px; font-size:13px; line-height:20px; color:#7b8189;">Sans nouveau dépôt avant la date limite, votre place sera libérée et proposée à une autre personne.</td></tr>
 
-          <tr><td align="right" style="padding:20px 32px; background-color:#ffffff; margin-top:24px; font-size:12px; line-height:19px; color:#7b8189; text-align:right;">${
+          <tr><td align="right" style="padding:24px 32px; background-color:#f2f5fb; border-top:1px solid #dee1e7; font-size:12px; line-height:19px; color:#7b8189;">${
             data.orgName || data.serviceName
               ? `Cet email vous est envoyé par <strong style="color:${MARINE};">${escapeHtml(data.orgName ?? data.serviceName!)}</strong>. Ne répondez pas à ce message.<br>`
               : 'Ne répondez pas à ce message.<br>'

@@ -7,6 +7,7 @@ const billetterie = () => env.get('SVC_BILLETTERIE_BASE_URL')
 const factures = () => env.get('SVC_FACTURES_BASE_URL')
 const gestion = () => env.get('SVC_GESTION_BASE_URL')
 const mail = () => env.get('SVC_MAIL_BASE_URL')
+const inscription = () => env.get('SVC_INSCRIPTION_BASE_URL')
 
 export default class StaffController {
   async listOrganizations(ctx: HttpContext) {
@@ -76,6 +77,30 @@ export default class StaffController {
     })
   }
 
+  async invoicePaymentAttempts(ctx: HttpContext) {
+    await proxyRequest(ctx, {
+      targetUrl: `${factures()}/invoices/staff/${ctx.params.id}/payment-attempts`,
+      jwt: { orgId: '', scope: 'staff', aud: 'svc-factures' },
+      forwardQueryString: true,
+    })
+  }
+
+  async listRegistrations(ctx: HttpContext) {
+    await proxyRequest(ctx, {
+      targetUrl: `${inscription()}/registrations/staff`,
+      jwt: { orgId: '', scope: 'staff', aud: 'svc-inscription' },
+      forwardQueryString: true,
+    })
+  }
+
+  async registrationPaymentAttempts(ctx: HttpContext) {
+    await proxyRequest(ctx, {
+      targetUrl: `${inscription()}/registrations/staff/${ctx.params.id}/payment-attempts`,
+      jwt: { orgId: '', scope: 'staff', aud: 'svc-inscription' },
+      forwardQueryString: true,
+    })
+  }
+
   async listPaymentRequests(ctx: HttpContext) {
     await proxyRequest(ctx, {
       targetUrl: `${gestion()}/payment-requests/staff`,
@@ -89,6 +114,13 @@ export default class StaffController {
       targetUrl: `${mail()}/emails/staff`,
       jwt: { orgId: '', scope: 'staff', aud: 'svc-mail' },
       forwardQueryString: true,
+    })
+  }
+
+  async getEmail(ctx: HttpContext) {
+    await proxyRequest(ctx, {
+      targetUrl: `${mail()}/emails/staff/${ctx.params.id}`,
+      jwt: { orgId: '', scope: 'staff', aud: 'svc-mail' },
     })
   }
 }
