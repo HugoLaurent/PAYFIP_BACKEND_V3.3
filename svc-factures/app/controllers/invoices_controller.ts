@@ -539,6 +539,33 @@ export default class InvoicesController {
         await sendInvoiceConfirmationEmail(invoice)
       }
 
+      // Démo commerciale (widget "Facture", voir gateway/demo_controller.ts) :
+      // une seule facture démo existe (DEMO-2026-001) — remise à l'état
+      // "draft" quelques instants après paiement pour que plusieurs
+      // visiteurs puissent tester le parcours de suite, sans qu'un agent
+      // n'ait à la réinitialiser à la main entre deux démos. Le délai
+      // laisse le temps au payeur de voir sa propre page de confirmation
+      // avant que la facture ne redevienne payable. Jamais pour une
+      // facture réelle : hospitalReference est comparée à une valeur figée.
+      if (rows.length > 0 && nextStatus === 'confirmed' && invoice.hospitalReference === 'DEMO-2026-001') {
+        setTimeout(() => {
+          db.connection(connectionName)
+            .from('invoices')
+            .where('id', invoice.id)
+            .update({
+              status: 'draft',
+              payment_request_id: null,
+              payfip_idop: null,
+              payment_reference: null,
+              payer_email: null,
+              deposited_at: null,
+              collected_at: null,
+              updated_at: DateTime.now().toSQL(),
+            })
+            .catch((error) => logger.error({ err: error }, 'échec de la remise à zéro de la facture démo'))
+        }, 90_000)
+      }
+
       return ctx.response.send({ received: true })
     })
   }
