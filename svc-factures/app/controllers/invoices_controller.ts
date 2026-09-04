@@ -555,7 +555,7 @@ export default class InvoicesController {
             .update({
               status: 'draft',
               payment_request_id: null,
-              payfip_idop: null,
+              payfip_id_op: null,
               payment_reference: null,
               payer_email: null,
               deposited_at: null,
