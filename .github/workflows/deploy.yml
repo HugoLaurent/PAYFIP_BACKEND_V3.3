@@ -5,6 +5,50 @@ on:
     branches: [main]
 
 jobs:
+  # Détermine quels services ont réellement changé dans ce push, pour ne
+  # reconstruire/redéployer que ceux-là — pas les 7 à chaque fois. Ne
+  # scope PAS l'audit (voir job audit ci-dessous) : une vulnérabilité peut
+  # être publiée sur une dépendance qu'on n'a pas touchée, indépendamment
+  # du diff.
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      services: ${{ steps.detect.outputs.services }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Detect changed services
+        id: detect
+        run: |
+          ALL_SERVICES="gateway svc-auth svc-billetterie svc-factures svc-gestion svc-mail svc-inscription"
+          BEFORE="${{ github.event.before }}"
+
+          if [ -z "$BEFORE" ] || [ "$BEFORE" = "0000000000000000000000000000000000000000" ]; then
+            echo "Pas de commit de référence (premier push sur la branche ou force-push) — déploiement complet par sécurité."
+            echo "services=$ALL_SERVICES" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          CHANGED=$(git diff --name-only "$BEFORE" "${{ github.sha }}")
+          PATTERN="^($(echo "$ALL_SERVICES" | tr ' ' '|'))/"
+
+          if echo "$CHANGED" | grep -qvE "$PATTERN"; then
+            echo "Changement hors des dossiers de service (CI, doc racine...) — déploiement complet par sécurité."
+            echo "services=$ALL_SERVICES" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          SERVICES=""
+          for svc in $ALL_SERVICES; do
+            if echo "$CHANGED" | grep -q "^$svc/"; then
+              SERVICES="$SERVICES $svc"
+            fi
+          done
+          SERVICES=$(echo "$SERVICES" | xargs)
+          echo "Services modifiés : ${SERVICES:-aucun}"
+          echo "services=$SERVICES" >> "$GITHUB_OUTPUT"
+
   audit:
     runs-on: ubuntu-latest
     strategy:
@@ -20,7 +64,8 @@ jobs:
         run: npm audit --audit-level=high
 
   deploy:
-    needs: audit
+    needs: [changes, audit]
+    if: needs.changes.outputs.services != ''
     runs-on: ubuntu-latest
     steps:
       - name: Deploy to VPS
@@ -33,5 +78,5 @@ jobs:
             set -e
             cd /opt/payfip/backend-src
             git pull origin main
-            sudo /opt/payfip/deploy/bin/compose-deploy.sh build gateway svc-auth svc-billetterie svc-factures svc-gestion svc-mail svc-inscription
-            sudo /opt/payfip/deploy/bin/compose-deploy.sh up -d gateway svc-auth svc-billetterie svc-factures svc-gestion svc-mail svc-inscription
+            sudo /opt/payfip/deploy/bin/compose-deploy.sh build ${{ needs.changes.outputs.services }}
+            sudo /opt/payfip/deploy/bin/compose-deploy.sh up -d ${{ needs.changes.outputs.services }}
