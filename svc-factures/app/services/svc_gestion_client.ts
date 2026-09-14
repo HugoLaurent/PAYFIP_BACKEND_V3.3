@@ -116,3 +116,43 @@ export async function retryPaymentRequest(
   const { data } = (await response.json()) as { data: PaymentRequestResult }
   return data
 }
+
+export interface PaymentAttempt {
+  id: number
+  status: string
+  createdAt: string
+  paidAt: string | null
+  isRetry: boolean
+}
+
+/**
+ * Historique complet des tentatives de paiement pour une référence — pour
+ * qu'un agent puisse répondre à un client qui a payé plusieurs fois, et
+ * pour que payment_attempt_expiry_service vérifie qu'un idOp qu'on
+ * s'apprête à expirer localement n'a pas en réalité été payé (webhook en
+ * retard).
+ */
+export async function listPaymentAttempts(
+  orgId: string,
+  sourceReference: string
+): Promise<PaymentAttempt[]> {
+  const token = await mintFacturesJwt({ orgId, scope: 'factures', aud: 'svc-gestion' })
+
+  const response = await fetchWithTimeout(
+    `${env.get('SVC_GESTION_BASE_URL')}/payment-requests/by-reference/${encodeURIComponent(sourceReference)}`,
+    { headers: { Authorization: `Bearer ${token}` } }
+  )
+
+  if (!response.ok) {
+    let body: unknown = null
+    try {
+      body = await response.json()
+    } catch {
+      body = null
+    }
+    throw new SvcGestionError(response.status, body)
+  }
+
+  const { data } = (await response.json()) as { data: PaymentAttempt[] }
+  return data
+}
