@@ -25,12 +25,15 @@ export default class TenantMigrate extends BaseCommand {
       return
     }
 
+    let failureCount = 0
+
     for (const config of configs) {
       const result = await runOnTenant(config.serviceId, () =>
         migrateTenantConnection(this.app, connectionNameFor(config.serviceId))
       )
 
       if (result.error) {
+        failureCount++
         this.logger.error(
           `serviceId=${config.serviceId} (${result.connectionName}) : échec — ${result.error.message}`
         )
@@ -40,6 +43,13 @@ export default class TenantMigrate extends BaseCommand {
       this.logger.info(
         `serviceId=${config.serviceId} (${result.connectionName}) : ${result.migratedCount} migration(s) appliquée(s)`
       )
+    }
+
+    // Sans ça, la commande sort en succès même si toutes les bases ont
+    // échoué — rien pour un script/pipeline qui vérifierait le code de
+    // sortie plutôt que de parser les logs.
+    if (failureCount > 0) {
+      this.exitCode = 1
     }
   }
 

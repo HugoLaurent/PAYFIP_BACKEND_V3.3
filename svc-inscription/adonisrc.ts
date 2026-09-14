@@ -25,6 +25,7 @@ export default defineConfig({
     () => import('#start/kernel'),
     () => import('#start/validator'),
     { file: () => import('#start/tenant_registry'), environment: ['web'] },
+    { file: () => import('#start/migrate_on_boot'), environment: ['web'] },
     { file: () => import('#start/scheduler'), environment: ['web'] },
   ],
 
