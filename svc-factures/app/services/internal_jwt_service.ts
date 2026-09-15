@@ -16,7 +16,7 @@ export interface FacturesJwtClaims {
 export async function mintFacturesJwt(claims: FacturesJwtClaims): Promise<string> {
   const privateKey = await privateKeyPromise
   return new SignJWT({ orgId: claims.orgId, scope: claims.scope })
-    .setProtectedHeader({ alg: 'EdDSA' })
+    .setProtectedHeader({ alg: 'EdDSA', kid: 'svc-factures' })
     .setIssuedAt()
     .setExpirationTime('2m')
     .setAudience(claims.aud)

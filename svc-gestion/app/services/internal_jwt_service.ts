@@ -16,7 +16,7 @@ export interface GestionJwtClaims {
 export async function mintGestionJwt(claims: GestionJwtClaims): Promise<string> {
   const privateKey = await privateKeyPromise
   return new SignJWT({ orgId: claims.orgId, scope: claims.scope })
-    .setProtectedHeader({ alg: 'EdDSA' })
+    .setProtectedHeader({ alg: 'EdDSA', kid: 'svc-gestion' })
     .setIssuedAt()
     .setExpirationTime('2m')
     .setAudience(claims.aud)

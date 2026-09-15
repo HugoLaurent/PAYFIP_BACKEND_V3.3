@@ -25,7 +25,7 @@ export interface ResolvedService {
 export async function resolveByNumcli(numcli: string): Promise<ResolvedService | null> {
   const privateKey = await privateKeyPromise
   const token = await new SignJWT({ orgId: '0', scope: 'billetterie' })
-    .setProtectedHeader({ alg: 'EdDSA' })
+    .setProtectedHeader({ alg: 'EdDSA', kid: 'svc-billetterie' })
     .setIssuedAt()
     .setExpirationTime('2m')
     .setAudience('svc-auth')
@@ -93,7 +93,7 @@ export async function fetchServiceStatus(
 ): Promise<ServiceAvailability | null> {
   const privateKey = await privateKeyPromise
   const token = await new SignJWT({ orgId: String(orgId), scope: 'billetterie' })
-    .setProtectedHeader({ alg: 'EdDSA' })
+    .setProtectedHeader({ alg: 'EdDSA', kid: 'svc-billetterie' })
     .setIssuedAt()
     .setExpirationTime('2m')
     .setAudience('svc-auth')

@@ -24,7 +24,7 @@ const privateKeyPromise = importJWK(decodeJwk(env.get('BILLETTERIE_JWT_PRIVATE_K
 async function mintRegistryJwt(): Promise<string> {
   const privateKey = await privateKeyPromise
   return new SignJWT({ orgId: '0', scope: 'billetterie' })
-    .setProtectedHeader({ alg: 'EdDSA' })
+    .setProtectedHeader({ alg: 'EdDSA', kid: 'svc-billetterie' })
     .setIssuedAt()
     .setExpirationTime('2m')
     .setAudience('svc-auth')

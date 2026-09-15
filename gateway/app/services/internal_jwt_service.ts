@@ -52,7 +52,7 @@ export async function mintInternalJwt(claims: InternalJwtClaims): Promise<string
     agentFirstName: claims.agentFirstName,
     agentLastName: claims.agentLastName,
   })
-    .setProtectedHeader({ alg: 'EdDSA' })
+    .setProtectedHeader({ alg: 'EdDSA', kid: 'gateway' })
     .setIssuedAt()
     .setExpirationTime('2m')
     .setAudience(claims.aud)

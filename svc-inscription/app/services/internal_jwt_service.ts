@@ -16,7 +16,7 @@ export interface InscriptionJwtClaims {
 export async function mintInscriptionJwt(claims: InscriptionJwtClaims): Promise<string> {
   const privateKey = await privateKeyPromise
   return new SignJWT({ orgId: claims.orgId, scope: claims.scope })
-    .setProtectedHeader({ alg: 'EdDSA' })
+    .setProtectedHeader({ alg: 'EdDSA', kid: 'svc-inscription' })
     .setIssuedAt()
     .setExpirationTime('2m')
     .setAudience(claims.aud)

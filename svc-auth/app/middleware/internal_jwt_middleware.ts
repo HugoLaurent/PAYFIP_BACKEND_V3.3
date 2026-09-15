@@ -1,6 +1,6 @@
 import type { HttpContext } from '@adonisjs/core/http'
 import type { NextFn } from '@adonisjs/core/types/http'
-import { importJWK, jwtVerify, type KeyObject } from 'jose'
+import { decodeProtectedHeader, importJWK, jwtVerify, type KeyObject } from 'jose'
 import env from '#start/env'
 
 export interface AgentPermissions {
@@ -31,13 +31,29 @@ function decodeJwk(base64: string) {
   return JSON.parse(Buffer.from(base64, 'base64').toString('utf-8'))
 }
 
-const trustedKeysPromise = Promise.all([
-  importJWK(decodeJwk(env.get('GATEWAY_JWT_PUBLIC_KEY')), 'EdDSA') as Promise<KeyObject>,
-  importJWK(decodeJwk(env.get('GESTION_JWT_PUBLIC_KEY')), 'EdDSA') as Promise<KeyObject>,
-  importJWK(decodeJwk(env.get('FACTURES_JWT_PUBLIC_KEY')), 'EdDSA') as Promise<KeyObject>,
-  importJWK(decodeJwk(env.get('BILLETTERIE_JWT_PUBLIC_KEY')), 'EdDSA') as Promise<KeyObject>,
-  importJWK(decodeJwk(env.get('INSCRIPTION_JWT_PUBLIC_KEY')), 'EdDSA') as Promise<KeyObject>,
-])
+// Un émetteur ne peut signer que pour lui-même : la vérification associe
+// chaque jeton à la clé exacte que son en-tête `kid` annonce (jamais
+// devinée par essai-erreur sur toutes les clés de confiance), et
+// n'accepte le scope du payload que s'il figure dans ce que CE kid a le
+// droit de déclarer (voir ALLOWED_SCOPES_BY_KID) — un scope auto-déclaré
+// dans le payload ne suffit plus à lui seul. Sans ça, n'importe quel
+// service de confiance (même le moins critique) pouvait signer un jeton
+// scope: 'staff' et obtenir les droits les plus élevés.
+const trustedKeys: Record<string, Promise<KeyObject>> = {
+  gateway: importJWK(decodeJwk(env.get('GATEWAY_JWT_PUBLIC_KEY')), 'EdDSA') as Promise<KeyObject>,
+  'svc-gestion': importJWK(decodeJwk(env.get('GESTION_JWT_PUBLIC_KEY')), 'EdDSA') as Promise<KeyObject>,
+  'svc-factures': importJWK(decodeJwk(env.get('FACTURES_JWT_PUBLIC_KEY')), 'EdDSA') as Promise<KeyObject>,
+  'svc-billetterie': importJWK(decodeJwk(env.get('BILLETTERIE_JWT_PUBLIC_KEY')), 'EdDSA') as Promise<KeyObject>,
+  'svc-inscription': importJWK(decodeJwk(env.get('INSCRIPTION_JWT_PUBLIC_KEY')), 'EdDSA') as Promise<KeyObject>,
+}
+
+const ALLOWED_SCOPES_BY_KID: Record<string, readonly string[]> = {
+  gateway: ['staff', 'billetterie', 'factures', 'inscription', 'auth'],
+  'svc-gestion': ['gestion'],
+  'svc-billetterie': ['billetterie'],
+  'svc-factures': ['factures'],
+  'svc-inscription': ['inscription'],
+}
 
 export default class InternalJwtMiddleware {
   async handle(ctx: HttpContext, next: NextFn) {
@@ -48,21 +64,33 @@ export default class InternalJwtMiddleware {
       return ctx.response.status(401).send({ error: 'missing_internal_token' })
     }
 
-    const trustedKeys = await trustedKeysPromise
-    let payload: Record<string, unknown> | undefined
+    let kid: string | undefined
+    try {
+      ;({ kid } = decodeProtectedHeader(token))
+    } catch {
+      return ctx.response.status(401).send({ error: 'invalid_internal_token' })
+    }
 
-    for (const key of trustedKeys) {
-      try {
-        const result = await jwtVerify(token, key, { algorithms: ['EdDSA'], audience: AUDIENCE })
-        payload = result.payload
-        break
-      } catch {
-        continue
-      }
+    if (!kid || !trustedKeys[kid]) {
+      return ctx.response.status(401).send({ error: 'invalid_internal_token' })
+    }
+    const keyPromise = trustedKeys[kid]
+
+    let payload: Record<string, unknown> | undefined
+    try {
+      const key = await keyPromise
+      const result = await jwtVerify(token, key, { algorithms: ['EdDSA'], audience: AUDIENCE })
+      payload = result.payload
+    } catch {
+      payload = undefined
     }
 
     if (!payload || typeof payload.orgId !== 'string' || typeof payload.scope !== 'string') {
       return ctx.response.status(401).send({ error: 'invalid_internal_token' })
+    }
+
+    if (!ALLOWED_SCOPES_BY_KID[kid]?.includes(payload.scope)) {
+      return ctx.response.status(401).send({ error: 'scope_not_allowed_for_signer' })
     }
 
     ctx.internalAuth = {

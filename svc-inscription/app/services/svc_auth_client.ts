@@ -33,7 +33,7 @@ export async function fetchServiceStatus(
 ): Promise<ServiceAvailability | null> {
   const privateKey = await privateKeyPromise
   const token = await new SignJWT({ orgId: String(orgId), scope: 'inscription' })
-    .setProtectedHeader({ alg: 'EdDSA' })
+    .setProtectedHeader({ alg: 'EdDSA', kid: 'svc-inscription' })
     .setIssuedAt()
     .setExpirationTime('2m')
     .setAudience('svc-auth')

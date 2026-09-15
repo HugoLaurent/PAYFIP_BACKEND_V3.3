@@ -1,6 +1,6 @@
 import type { HttpContext } from '@adonisjs/core/http'
 import type { NextFn } from '@adonisjs/core/types/http'
-import { importJWK, jwtVerify, type KeyObject } from 'jose'
+import { decodeProtectedHeader, importJWK, jwtVerify, type KeyObject } from 'jose'
 import env from '#start/env'
 
 export interface AgentPermissions {
@@ -35,10 +35,18 @@ function decodeJwk(base64: string) {
   return JSON.parse(Buffer.from(base64, 'base64').toString('utf-8'))
 }
 
-const trustedKeysPromise = Promise.all([
-  importJWK(decodeJwk(env.get('GATEWAY_JWT_PUBLIC_KEY')), 'EdDSA') as Promise<KeyObject>,
-  importJWK(decodeJwk(env.get('GESTION_JWT_PUBLIC_KEY')), 'EdDSA') as Promise<KeyObject>,
-])
+// Voir svc-auth/internal_jwt_middleware.ts pour le raisonnement complet :
+// le kid annoncé choisit la clé exacte à vérifier, et le scope du
+// payload doit figurer dans ce que ce kid a le droit de déclarer.
+const trustedKeys: Record<string, Promise<KeyObject>> = {
+  gateway: importJWK(decodeJwk(env.get('GATEWAY_JWT_PUBLIC_KEY')), 'EdDSA') as Promise<KeyObject>,
+  'svc-gestion': importJWK(decodeJwk(env.get('GESTION_JWT_PUBLIC_KEY')), 'EdDSA') as Promise<KeyObject>,
+}
+
+const ALLOWED_SCOPES_BY_KID: Record<string, readonly string[]> = {
+  gateway: ['staff', 'billetterie', 'factures', 'inscription', 'auth'],
+  'svc-gestion': ['gestion'],
+}
 
 export default class InternalJwtMiddleware {
   async handle(ctx: HttpContext, next: NextFn) {
@@ -49,21 +57,33 @@ export default class InternalJwtMiddleware {
       return ctx.response.status(401).send({ error: 'missing_internal_token' })
     }
 
-    const trustedKeys = await trustedKeysPromise
-    let payload: Record<string, unknown> | undefined
+    let kid: string | undefined
+    try {
+      ;({ kid } = decodeProtectedHeader(token))
+    } catch {
+      return ctx.response.status(401).send({ error: 'invalid_internal_token' })
+    }
 
-    for (const key of trustedKeys) {
-      try {
-        const result = await jwtVerify(token, key, { algorithms: ['EdDSA'], audience: AUDIENCE })
-        payload = result.payload
-        break
-      } catch {
-        continue
-      }
+    if (!kid || !trustedKeys[kid]) {
+      return ctx.response.status(401).send({ error: 'invalid_internal_token' })
+    }
+    const keyPromise = trustedKeys[kid]
+
+    let payload: Record<string, unknown> | undefined
+    try {
+      const key = await keyPromise
+      const result = await jwtVerify(token, key, { algorithms: ['EdDSA'], audience: AUDIENCE })
+      payload = result.payload
+    } catch {
+      payload = undefined
     }
 
     if (!payload || typeof payload.orgId !== 'string' || typeof payload.scope !== 'string') {
       return ctx.response.status(401).send({ error: 'invalid_internal_token' })
+    }
+
+    if (!ALLOWED_SCOPES_BY_KID[kid]?.includes(payload.scope)) {
+      return ctx.response.status(401).send({ error: 'scope_not_allowed_for_signer' })
     }
 
     ctx.internalAuth = {

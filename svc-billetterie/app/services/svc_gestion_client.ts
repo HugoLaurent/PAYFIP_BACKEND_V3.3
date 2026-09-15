@@ -45,7 +45,7 @@ export async function createPaymentRequest(
 ): Promise<PaymentRequestResult> {
   const privateKey = await privateKeyPromise
   const token = await new SignJWT({ orgId: params.orgId, scope: 'billetterie' })
-    .setProtectedHeader({ alg: 'EdDSA' })
+    .setProtectedHeader({ alg: 'EdDSA', kid: 'svc-billetterie' })
     .setIssuedAt()
     .setExpirationTime('2m')
     .setAudience('svc-gestion')
@@ -94,7 +94,7 @@ export async function retryPaymentRequest(
 ): Promise<PaymentRequestResult> {
   const privateKey = await privateKeyPromise
   const token = await new SignJWT({ orgId: params.orgId, scope: 'billetterie' })
-    .setProtectedHeader({ alg: 'EdDSA' })
+    .setProtectedHeader({ alg: 'EdDSA', kid: 'svc-billetterie' })
     .setIssuedAt()
     .setExpirationTime('2m')
     .setAudience('svc-gestion')
@@ -149,7 +149,7 @@ export async function listPaymentAttempts(
 ): Promise<PaymentAttempt[]> {
   const privateKey = await privateKeyPromise
   const token = await new SignJWT({ orgId, scope: 'billetterie' })
-    .setProtectedHeader({ alg: 'EdDSA' })
+    .setProtectedHeader({ alg: 'EdDSA', kid: 'svc-billetterie' })
     .setIssuedAt()
     .setExpirationTime('2m')
     .setAudience('svc-gestion')

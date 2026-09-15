@@ -24,7 +24,7 @@ export interface SendMailParams {
 export async function sendMail(params: SendMailParams): Promise<{ sent: boolean }> {
   const privateKey = await privateKeyPromise
   const token = await new SignJWT({ orgId: '0', scope: 'billetterie' })
-    .setProtectedHeader({ alg: 'EdDSA' })
+    .setProtectedHeader({ alg: 'EdDSA', kid: 'svc-billetterie' })
     .setIssuedAt()
     .setExpirationTime('2m')
     .setAudience('svc-mail')

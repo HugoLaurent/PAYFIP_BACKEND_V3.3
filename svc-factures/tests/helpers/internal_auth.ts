@@ -14,12 +14,22 @@ export interface TestJwtClaims {
   scope: string
   sub?: string
   role?: string
+  // En test, GATEWAY_JWT_PUBLIC_KEY et GESTION_JWT_PUBLIC_KEY pointent
+  // tous deux vers cette même paire de clés de test — le kid choisit
+  // uniquement quelle entrée d'ALLOWED_SCOPES_BY_KID s'applique côté
+  // middleware. Déduit de scope par défaut, remplaçable si besoin.
+  kid?: string
+}
+
+function defaultKidFor(scope: string): string {
+  return scope === 'gestion' ? 'svc-gestion' : 'gateway'
 }
 
 export async function mintTestInternalJwt(claims: TestJwtClaims): Promise<string> {
   const privateKey = await privateKeyPromise
-  return new SignJWT({ ...claims })
-    .setProtectedHeader({ alg: 'EdDSA' })
+  const { kid, ...payload } = claims
+  return new SignJWT({ ...payload })
+    .setProtectedHeader({ alg: 'EdDSA', kid: kid ?? defaultKidFor(claims.scope) })
     .setIssuedAt()
     .setExpirationTime('2m')
     .setAudience('svc-factures')
