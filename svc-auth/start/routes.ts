@@ -47,6 +47,12 @@ router
     router.get('/services', [ServicesController, 'index'])
     router.get('/services/:id', [ServicesController, 'show'])
     router.patch('/services/:id', [ServicesController, 'update'])
+    router.get('/services/:id/aregie-mail-key', [ServicesController, 'showAregieMailKey'])
+    router.put('/services/:id/aregie-mail-key', [ServicesController, 'updateAregieMailKey'])
+    router.get('/internal/services/:id/aregie-mail-key', [
+      ServicesController,
+      'internalAregieMailKey',
+    ])
     router.post('/services/:id/closures', [ServicesController, 'createClosure'])
     router.delete('/services/:id/closures/:closureId', [ServicesController, 'deleteClosure'])
     router.post('/services/:id/logo', [ServicesController, 'uploadLogo'])

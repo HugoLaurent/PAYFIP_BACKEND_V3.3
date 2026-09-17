@@ -9,10 +9,12 @@ import UserServiceAssignment from '#models/user_service_assignment'
 import {
   createServiceValidator,
   updateServiceValidator,
+  updateServiceAregieMailKeyValidator,
   createServiceClosureValidator,
 } from '#validators/service'
 import { processCoverImage, processLogo } from '#services/image_processing_service'
 import { computeServiceAvailability } from '#services/service_availability_service'
+import { encryptSecret, decryptSecret } from '#services/tenant_credentials_service'
 
 const lookupValidator = vine.compile(
   vine.object({
@@ -820,4 +822,77 @@ export default class ServicesController {
 
     return ctx.response.send({ data: { id: service.id, hasCoverImage: false } })
   }
+
+  /**
+   * GET /services/:id/aregie-mail-key — statut de la clé API AREGIE Mail
+   * propre à ce service (jamais la valeur en clair, voir
+   * internalAregieMailKey pour la seule lecture déchiffrée, réservée à
+   * svc-mail). Staff uniquement : c'est nous qui provisionnons/assistons
+   * la connexion de chaque service à AREGIE Mail, jamais l'organisme.
+   */
+  async showAregieMailKey(ctx: HttpContext) {
+    if (ctx.internalAuth.scope !== 'staff') {
+      return ctx.response.status(403).send({ error: 'scope_not_allowed' })
+    }
+
+    const service = await Service.query()
+      .select('id', 'aregieMailApiKeyEnc', 'updatedAt')
+      .where('id', Number(ctx.params.id))
+      .first()
+    if (!service) {
+      return ctx.response.status(404).send({ error: 'service_not_found' })
+    }
+
+    return ctx.response.send({ data: await aregieMailKeyStatus(service) })
+  }
+
+  async updateAregieMailKey(ctx: HttpContext) {
+    if (ctx.internalAuth.scope !== 'staff') {
+      return ctx.response.status(403).send({ error: 'scope_not_allowed' })
+    }
+
+    const service = await Service.find(Number(ctx.params.id))
+    if (!service) {
+      return ctx.response.status(404).send({ error: 'service_not_found' })
+    }
+
+    const { apiKey } = await ctx.request.validateUsing(updateServiceAregieMailKeyValidator)
+    service.aregieMailApiKeyEnc = await encryptSecret(apiKey)
+    await service.save()
+
+    return ctx.response.send({ data: await aregieMailKeyStatus(service) })
+  }
+
+  /**
+   * GET /internal/services/:id/aregie-mail-key — seule route qui déchiffre
+   * la clé API AREGIE Mail d'un service, réservée à svc-mail au moment
+   * d'un envoi (voir svc-mail/svc_auth_client.ts). `apiKey: null` si le
+   * service n'a pas de clé propre — svc-mail retombe alors sur sa clé par
+   * défaut, jamais une erreur ici.
+   */
+  async internalAregieMailKey(ctx: HttpContext) {
+    if (ctx.internalAuth.scope !== 'mail') {
+      return ctx.response.status(403).send({ error: 'scope_not_allowed' })
+    }
+
+    const service = await Service.query()
+      .select('id', 'aregieMailApiKeyEnc')
+      .where('id', Number(ctx.params.id))
+      .first()
+
+    const apiKey = service?.aregieMailApiKeyEnc
+      ? await decryptSecret(service.aregieMailApiKeyEnc)
+      : null
+
+    return ctx.response.send({ data: { apiKey } })
+  }
+}
+
+async function aregieMailKeyStatus(service: Service) {
+  if (!service.aregieMailApiKeyEnc) {
+    return { configured: false, last4: null, updatedAt: null }
+  }
+
+  const apiKey = await decryptSecret(service.aregieMailApiKeyEnc)
+  return { configured: true, last4: apiKey.slice(-4), updatedAt: service.updatedAt.toISO() }
 }

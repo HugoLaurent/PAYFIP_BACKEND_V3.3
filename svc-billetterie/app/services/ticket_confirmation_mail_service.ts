@@ -38,6 +38,7 @@ export async function sendTicketConfirmationEmail(order: Order, tickets: Ticket[
     await sendMail({
       template: 'ticket_confirmation',
       to: order.email,
+      serviceId: String(order.serviceId),
       data: {
         email: order.email,
         confirmation: order.paymentReference ?? String(order.id),

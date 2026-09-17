@@ -55,6 +55,13 @@ export default class Service extends BaseModel {
   @column()
   declare closedMessage: string | null
 
+  // Clé API AREGIE Mail propre à ce service (chiffrée, voir
+  // tenant_credentials_service.ts) — un organisme peut avoir plusieurs
+  // services avec des boîtes d'envoi différentes. `null` = pas de clé
+  // propre, svc-mail retombe alors sur sa clé par défaut (OTP).
+  @column({ serializeAs: null })
+  declare aregieMailApiKeyEnc: string | null
+
   @column({ serializeAs: null })
   declare logoData: Buffer | null
 

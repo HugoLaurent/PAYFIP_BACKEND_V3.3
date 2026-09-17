@@ -44,6 +44,12 @@ export const updateServiceValidator = vine.compile(
   })
 )
 
+export const updateServiceAregieMailKeyValidator = vine.compile(
+  vine.object({
+    apiKey: vine.string().trim().minLength(10),
+  })
+)
+
 export const createServiceClosureValidator = vine.compile(
   vine.object({
     label: vine.string().trim().minLength(1).maxLength(120),

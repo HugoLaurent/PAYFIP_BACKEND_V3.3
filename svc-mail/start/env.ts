@@ -20,12 +20,17 @@ export default await Env.create(new URL('../', import.meta.url), {
   FACTURES_JWT_PUBLIC_KEY: Env.schema.string(),
   GATEWAY_JWT_PUBLIC_KEY: Env.schema.string(),
   INSCRIPTION_JWT_PUBLIC_KEY: Env.schema.string(),
+  // Signe les appels sortants vers svc-auth (scope 'mail') — voir
+  // svc_auth_client.ts, utilisé pour lire la clé API AREGIE Mail propre à
+  // un service (stockée côté svc-auth, sur la table services).
+  MAIL_JWT_PRIVATE_KEY: Env.schema.string(),
+  SVC_AUTH_BASE_URL: Env.schema.string({ format: 'url', tld: false }),
 
   MAIL_MODE: Env.schema.enum(['fake', 'real'] as const),
   // Service AREGIE Mail (voir CLIENT_GUIDE.md du dépôt AREGIE_MAIL) — la
-  // clé API est saisie par un admin depuis le back office et vit chiffrée
-  // en base (aregie_mail_settings_service.ts), pas ici. L'URL, elle,
-  // n'est pas un secret et reste une variable d'environnement.
+  // clé API par défaut est saisie par un admin depuis le back office et
+  // vit chiffrée en base (aregie_mail_settings_service.ts), pas ici.
+  // L'URL, elle, n'est pas un secret et reste une variable d'environnement.
   AREGIE_MAIL_API_URL: Env.schema.string.optional(),
   MAIL_TEST_OVERRIDE_EMAIL: Env.schema.string.optional(),
 

@@ -20,6 +20,12 @@ export default class EmailDelivery extends BaseModel {
   @column()
   declare toEmail: string
 
+  // Service pour lequel cet email est envoyé (voir
+  // aregie_mail_settings_service.ts) — null pour les emails sans service
+  // précis (OTP), qui utilisent alors la clé AREGIE Mail par défaut.
+  @column()
+  declare serviceId: string | null
+
   @column({
     prepare: (value: unknown) => JSON.stringify(value),
     consume: (value: string) => JSON.parse(value) as Record<string, unknown>,

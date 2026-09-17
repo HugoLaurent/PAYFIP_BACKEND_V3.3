@@ -4,7 +4,7 @@ import env from '#start/env'
 import EmailDelivery from '#models/email_delivery'
 import { renderMailTemplate, type MailTemplateName } from '#services/mail_template_registry'
 import { notifyOpsAlert } from '#services/ops_alert_service'
-import { getApiKey } from '#services/aregie_mail_settings_service'
+import { resolveApiKey } from '#services/aregie_mail_settings_service'
 
 // Au-delà de ce délai depuis la première tentative, on arrête de rejouer
 // (le backoff exponentiel a de toute façon rendu les essais suivants
@@ -26,13 +26,15 @@ interface AregieMailResponse {
 // La clé API elle-même vit en base (chiffrée, voir
 // aregie_mail_settings_service.ts), saisie par un admin depuis le back
 // office — plus de Vault, plus de variable d'environnement pour ce secret.
+// Une clé par service (si configurée) prime sur la clé par défaut.
 async function sendViaAregieMail(params: {
   to: string
   subject: string
   html: string
+  serviceId: string | null
   attachments: { filename: string; contentBase64: string; contentType: string }[]
 }): Promise<void> {
-  const apiKey = await getApiKey()
+  const apiKey = await resolveApiKey(params.serviceId)
   if (!apiKey) {
     throw new Error('Clé API AREGIE Mail non configurée (back office)')
   }
@@ -83,6 +85,7 @@ export async function attemptDelivery(delivery: EmailDelivery): Promise<void> {
       to: recipient,
       subject: rendered.subject,
       html: rendered.html,
+      serviceId: delivery.serviceId,
       attachments: delivery.attachments ?? [],
     })
 

@@ -249,6 +249,8 @@ router
     router.post('/staff/organizations/:id/services', [StaffController, 'createService'])
     router.get('/staff/services', [StaffController, 'listServices'])
     router.patch('/staff/services/:id', [StaffController, 'updateService'])
+    router.get('/staff/services/:id/aregie-mail-key', [StaffController, 'getServiceAregieMailKey'])
+    router.put('/staff/services/:id/aregie-mail-key', [StaffController, 'updateServiceAregieMailKey'])
     router.get('/staff/users', [StaffController, 'listUsers'])
     router.get('/staff/orders', [StaffController, 'listOrders'])
     router.get('/staff/invoices', [StaffController, 'listInvoices'])

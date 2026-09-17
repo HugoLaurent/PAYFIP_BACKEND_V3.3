@@ -35,3 +35,17 @@ export async function decryptTenantDbPassword(encoded: string): Promise<string> 
   decipher.setAuthTag(authTag)
   return Buffer.concat([decipher.update(ciphertext), decipher.final()]).toString('utf-8')
 }
+
+/**
+ * Même schéma que ci-dessus (AES-256-GCM, même clé TENANT_DB_CREDENTIALS_KEY),
+ * réutilisé pour la clé API AREGIE Mail propre à un service
+ * (services.aregie_mail_api_key_enc) — un autre secret à ne jamais stocker
+ * en clair, pas de raison de dupliquer l'algorithme pour ça.
+ */
+export async function encryptSecret(plaintext: string): Promise<string> {
+  return encryptTenantDbPassword(plaintext)
+}
+
+export async function decryptSecret(encoded: string): Promise<string> {
+  return decryptTenantDbPassword(encoded)
+}
