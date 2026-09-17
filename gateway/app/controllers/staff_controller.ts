@@ -123,4 +123,18 @@ export default class StaffController {
       jwt: { orgId: '', scope: 'staff', aud: 'svc-mail' },
     })
   }
+
+  async getAregieMailSettings(ctx: HttpContext) {
+    await proxyRequest(ctx, {
+      targetUrl: `${mail()}/settings/aregie-mail`,
+      jwt: { orgId: '', scope: 'staff', aud: 'svc-mail' },
+    })
+  }
+
+  async updateAregieMailSettings(ctx: HttpContext) {
+    await proxyRequest(ctx, {
+      targetUrl: `${mail()}/settings/aregie-mail`,
+      jwt: { orgId: '', scope: 'staff', aud: 'svc-mail' },
+    })
+  }
 }

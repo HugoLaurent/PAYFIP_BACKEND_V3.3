@@ -7,6 +7,7 @@ import db from '@adonisjs/lucid/services/db'
 
 const EmailsController = () => import('#controllers/emails_controller')
 const StaffController = () => import('#controllers/staff_controller')
+const SettingsController = () => import('#controllers/settings_controller')
 
 const healthChecks = new HealthChecks().register([new DbCheck(db.connection())])
 
@@ -24,5 +25,7 @@ router
     router.post('/emails', [EmailsController, 'send'])
     router.get('/emails/staff', [StaffController, 'index'])
     router.get('/emails/staff/:id', [StaffController, 'show'])
+    router.get('/settings/aregie-mail', [SettingsController, 'showAregieMailApiKey'])
+    router.put('/settings/aregie-mail', [SettingsController, 'updateAregieMailApiKey'])
   })
   .use(middleware.internalAuth())

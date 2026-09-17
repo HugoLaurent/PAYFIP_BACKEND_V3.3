@@ -22,12 +22,11 @@ export default await Env.create(new URL('../', import.meta.url), {
   INSCRIPTION_JWT_PUBLIC_KEY: Env.schema.string(),
 
   MAIL_MODE: Env.schema.enum(['fake', 'real'] as const),
-  SMTP_HOST: Env.schema.string.optional(),
-  SMTP_PORT: Env.schema.number.optional(),
-  SMTP_USERNAME: Env.schema.string.optional(),
-  SMTP_PASSWORD: Env.schema.string.optional(),
-  MAIL_FROM_ADDRESS: Env.schema.string.optional(),
-  MAIL_FROM_NAME: Env.schema.string.optional(),
+  // Service AREGIE Mail (voir CLIENT_GUIDE.md du dépôt AREGIE_MAIL) — la
+  // clé API est saisie par un admin depuis le back office et vit chiffrée
+  // en base (aregie_mail_settings_service.ts), pas ici. L'URL, elle,
+  // n'est pas un secret et reste une variable d'environnement.
+  AREGIE_MAIL_API_URL: Env.schema.string.optional(),
   MAIL_TEST_OVERRIDE_EMAIL: Env.schema.string.optional(),
 
   // Suivi d'erreurs (GlitchTip, self-hosted, compatible Sentry) — absent en

@@ -1,10 +1,10 @@
 import { DateTime } from 'luxon'
 import logger from '@adonisjs/core/services/logger'
-import mail from '@adonisjs/mail/services/main'
 import env from '#start/env'
 import EmailDelivery from '#models/email_delivery'
 import { renderMailTemplate, type MailTemplateName } from '#services/mail_template_registry'
 import { notifyOpsAlert } from '#services/ops_alert_service'
+import { getApiKey } from '#services/aregie_mail_settings_service'
 
 // Au-delà de ce délai depuis la première tentative, on arrête de rejouer
 // (le backoff exponentiel a de toute façon rendu les essais suivants
@@ -12,15 +12,60 @@ import { notifyOpsAlert } from '#services/ops_alert_service'
 // silence.
 const MAX_RETRY_AGE_HOURS = 24
 
+const DEFAULT_AREGIE_MAIL_API_URL = 'https://mail.aregie.com/api/send'
+
+interface AregieMailResponse {
+  success: boolean
+  error?: string
+}
+
+// L'expéditeur ("from") n'est plus paramétrable ici : il est déterminé côté
+// AREGIE Mail par la boîte connectée à la clé API (voir CLIENT_GUIDE.md du
+// dépôt AREGIE_MAIL) — MAIL_FROM_ADDRESS/MAIL_FROM_NAME n'ont plus d'usage.
+//
+// La clé API elle-même vit en base (chiffrée, voir
+// aregie_mail_settings_service.ts), saisie par un admin depuis le back
+// office — plus de Vault, plus de variable d'environnement pour ce secret.
+async function sendViaAregieMail(params: {
+  to: string
+  subject: string
+  html: string
+  attachments: { filename: string; contentBase64: string; contentType: string }[]
+}): Promise<void> {
+  const apiKey = await getApiKey()
+  if (!apiKey) {
+    throw new Error('Clé API AREGIE Mail non configurée (back office)')
+  }
+
+  const response = await fetch(env.get('AREGIE_MAIL_API_URL') ?? DEFAULT_AREGIE_MAIL_API_URL, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      'x-api-key': apiKey,
+    },
+    body: JSON.stringify({
+      to: params.to,
+      subject: params.subject,
+      html: params.html,
+      attachments: params.attachments.map((attachment) => ({
+        filename: attachment.filename,
+        content: attachment.contentBase64,
+        contentType: attachment.contentType,
+      })),
+    }),
+  })
+
+  const body = (await response.json().catch(() => null)) as AregieMailResponse | null
+
+  if (!response.ok || !body?.success) {
+    throw new Error(body?.error ?? `AREGIE Mail: HTTP ${response.status}`)
+  }
+}
+
 export async function attemptDelivery(delivery: EmailDelivery): Promise<void> {
   delivery.attempts += 1
 
   try {
-    const fromAddress = env.get('MAIL_FROM_ADDRESS')
-    if (!fromAddress) {
-      throw new Error('MAIL_FROM_ADDRESS manquant')
-    }
-
     const rendered = await renderMailTemplate(
       delivery.template as MailTemplateName,
       delivery.data
@@ -34,19 +79,11 @@ export async function attemptDelivery(delivery: EmailDelivery): Promise<void> {
       )
     }
 
-    await mail.send((message) => {
-      message
-        .to(recipient)
-        .from(fromAddress, env.get('MAIL_FROM_NAME'))
-        .subject(rendered.subject)
-        .html(rendered.html)
-
-      for (const attachment of delivery.attachments ?? []) {
-        message.attachData(Buffer.from(attachment.contentBase64, 'base64'), {
-          filename: attachment.filename,
-          contentType: attachment.contentType,
-        })
-      }
+    await sendViaAregieMail({
+      to: recipient,
+      subject: rendered.subject,
+      html: rendered.html,
+      attachments: delivery.attachments ?? [],
     })
 
     delivery.status = 'sent'

@@ -261,5 +261,7 @@ router
     router.get('/staff/payment-requests', [StaffController, 'listPaymentRequests'])
     router.get('/staff/emails', [StaffController, 'listEmails'])
     router.get('/staff/emails/:id', [StaffController, 'getEmail'])
+    router.get('/staff/settings/aregie-mail', [StaffController, 'getAregieMailSettings'])
+    router.put('/staff/settings/aregie-mail', [StaffController, 'updateAregieMailSettings'])
   })
   .use(middleware.staffAuth())
