@@ -1,6 +1,6 @@
 import { DateTime } from 'luxon'
 import { test } from '@japa/runner'
-import mail from '@adonisjs/mail/services/main'
+import env from '#start/env'
 import EmailDelivery from '#models/email_delivery'
 import { attemptDelivery, retryFailedDeliveries } from '#services/email_dispatcher_service'
 
@@ -8,9 +8,26 @@ function uniqueEmail(tag: string): string {
   return `mail-unit-${tag}-${Date.now()}-${Math.floor(Math.random() * 1e6)}@test.fr`
 }
 
+// Simule l'API AREGIE Mail (voir email_dispatcher_service.ts) sans réseau :
+// on remplace le fetch global le temps du test.
+function fakeAregieMail() {
+  const originalFetch = globalThis.fetch
+  const originalApiKey = env.get('AREGIE_MAIL_API_KEY')
+  env.set('AREGIE_MAIL_API_KEY', 'sk_test')
+  globalThis.fetch = (async () =>
+    new Response(JSON.stringify({ success: true, messageId: 'test' }), {
+      status: 200,
+    })) as typeof fetch
+
+  return () => {
+    globalThis.fetch = originalFetch
+    env.set('AREGIE_MAIL_API_KEY', originalApiKey)
+  }
+}
+
 test.group('email_dispatcher_service#attemptDelivery', () => {
   test('template + données valides -> sent, plus de retry programmé', async ({ assert }) => {
-    mail.fake()
+    const restore = fakeAregieMail()
     try {
       const delivery = await EmailDelivery.create({
         template: 'otp_code',
@@ -28,19 +45,19 @@ test.group('email_dispatcher_service#attemptDelivery', () => {
       assert.isNull(delivery.error)
       assert.equal(delivery.attempts, 1)
     } finally {
-      mail.restore()
+      restore()
     }
   })
 
   test('données invalides pour le template -> failed avec backoff, ne lève pas', async ({
     assert,
   }) => {
-    mail.fake()
+    const restore = fakeAregieMail()
     try {
       const delivery = await EmailDelivery.create({
         // "code" manquant : la validation du template échoue avant tout
-        // envoi SMTP — un banc d'essai simple et déterministe du chemin
-        // d'échec, sans dépendre d'un vrai serveur mail indisponible.
+        // appel à l'API AREGIE Mail — un banc d'essai simple et
+        // déterministe du chemin d'échec, sans dépendre d'un vrai envoi.
         template: 'otp_code',
         toEmail: uniqueEmail('bad'),
         data: { ttlMinutes: 10 },
@@ -55,7 +72,7 @@ test.group('email_dispatcher_service#attemptDelivery', () => {
       assert.isNotNull(delivery.nextRetryAt)
       assert.equal(delivery.attempts, 1)
     } finally {
-      mail.restore()
+      restore()
     }
   })
 })
@@ -64,7 +81,7 @@ test.group('email_dispatcher_service#retryFailedDeliveries', () => {
   test('ne rejoue que les échecs dont nextRetryAt est passé, jamais les "sent"', async ({
     assert,
   }) => {
-    mail.fake()
+    const restore = fakeAregieMail()
     try {
       const due = await EmailDelivery.create({
         template: 'otp_code',
@@ -106,7 +123,7 @@ test.group('email_dispatcher_service#retryFailedDeliveries', () => {
       await alreadySent.refresh()
       assert.equal(alreadySent.attempts, 1, 'déjà envoyée, ne doit jamais être re-tentée')
     } finally {
-      mail.restore()
+      restore()
     }
   })
 })

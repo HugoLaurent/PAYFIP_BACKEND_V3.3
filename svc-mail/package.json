@@ -59,7 +59,6 @@
     "@adonisjs/core": "^7.3.3",
     "@adonisjs/cors": "^3.0.0",
     "@adonisjs/lucid": "^22.4.2",
-    "@adonisjs/mail": "^10.4.0",
     "@japa/api-client": "^3.2.1",
     "@sentry/node": "^10.71.0",
     "@vinejs/vine": "^4.4.0",
