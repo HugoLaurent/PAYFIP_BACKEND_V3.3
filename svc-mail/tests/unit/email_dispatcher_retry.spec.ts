@@ -2,7 +2,7 @@ import { DateTime } from 'luxon'
 import { test } from '@japa/runner'
 import EmailDelivery from '#models/email_delivery'
 import { attemptDelivery, retryFailedDeliveries } from '#services/email_dispatcher_service'
-import { setApiKey } from '#services/aregie_mail_settings_service'
+import { setDefaultApiKey } from '#services/aregie_mail_settings_service'
 
 function uniqueEmail(tag: string): string {
   return `mail-unit-${tag}-${Date.now()}-${Math.floor(Math.random() * 1e6)}@test.fr`
@@ -14,7 +14,7 @@ function uniqueEmail(tag: string): string {
 // aregie_mail_settings_service.ts).
 async function fakeAregieMail() {
   const originalFetch = globalThis.fetch
-  await setApiKey('sk_test')
+  await setDefaultApiKey('sk_test')
   globalThis.fetch = (async () =>
     new Response(JSON.stringify({ success: true, messageId: 'test' }), {
       status: 200,

@@ -21,6 +21,7 @@ export default await Env.create(new URL('../', import.meta.url), {
   FACTURES_JWT_PUBLIC_KEY: Env.schema.string(),
   BILLETTERIE_JWT_PUBLIC_KEY: Env.schema.string(),
   INSCRIPTION_JWT_PUBLIC_KEY: Env.schema.string(),
+  MAIL_JWT_PUBLIC_KEY: Env.schema.string(),
 
   // Clé symétrique (32 octets, base64) chiffrant les mots de passe DB
   // stockés dans tenant_databases — voir tenant_credentials_service.ts.

@@ -45,6 +45,7 @@ const trustedKeys: Record<string, Promise<KeyObject>> = {
   'svc-factures': importJWK(decodeJwk(env.get('FACTURES_JWT_PUBLIC_KEY')), 'EdDSA') as Promise<KeyObject>,
   'svc-billetterie': importJWK(decodeJwk(env.get('BILLETTERIE_JWT_PUBLIC_KEY')), 'EdDSA') as Promise<KeyObject>,
   'svc-inscription': importJWK(decodeJwk(env.get('INSCRIPTION_JWT_PUBLIC_KEY')), 'EdDSA') as Promise<KeyObject>,
+  'svc-mail': importJWK(decodeJwk(env.get('MAIL_JWT_PUBLIC_KEY')), 'EdDSA') as Promise<KeyObject>,
 }
 
 const ALLOWED_SCOPES_BY_KID: Record<string, readonly string[]> = {
@@ -53,6 +54,7 @@ const ALLOWED_SCOPES_BY_KID: Record<string, readonly string[]> = {
   'svc-billetterie': ['billetterie'],
   'svc-factures': ['factures'],
   'svc-inscription': ['inscription'],
+  'svc-mail': ['mail'],
 }
 
 export default class InternalJwtMiddleware {

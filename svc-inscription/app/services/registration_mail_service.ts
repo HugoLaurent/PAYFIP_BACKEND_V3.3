@@ -112,6 +112,7 @@ export async function sendRegistrationConfirmationEmail(
     sendMail({
       template: 'inscription_confirmation',
       to: registration.email,
+      serviceId: String(registration.serviceId),
       data: {
         email: registration.email,
         eventTitle: event.title,
@@ -135,6 +136,7 @@ export async function sendPaymentRequestEmail(registration: Registration, event:
     sendMail({
       template: 'inscription_payment_request',
       to: registration.email,
+      serviceId: String(registration.serviceId),
       data: {
         email: registration.email,
         eventTitle: event.title,
@@ -158,6 +160,7 @@ export async function sendRegistrationRejectionEmail(
     sendMail({
       template: 'inscription_registration_rejected',
       to: registration.email,
+      serviceId: String(registration.serviceId),
       data: {
         email: registration.email,
         eventTitle: event.title,
@@ -191,6 +194,7 @@ export async function sendEventCancelledEmail(
     sendMail({
       template: 'inscription_event_cancelled',
       to: registration.email,
+      serviceId: String(registration.serviceId),
       data: {
         email: registration.email,
         eventTitle: event.title,
@@ -212,6 +216,7 @@ export async function sendWaitlistOfferEmail(registration: Registration, event: 
     sendMail({
       template: 'inscription_waitlist_offer',
       to: registration.email,
+      serviceId: String(registration.serviceId),
       data: {
         email: registration.email,
         eventTitle: event.title,

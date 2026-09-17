@@ -5,6 +5,9 @@ export const sendEmailValidator = vine.compile(
   vine.object({
     template: vine.enum(MAIL_TEMPLATE_NAMES),
     to: vine.string().trim().email(),
+    // Absent pour les emails sans service (OTP) — voir
+    // aregie_mail_settings_service.ts#resolveApiKey.
+    serviceId: vine.string().trim().optional(),
     data: vine.object({}).allowUnknownProperties(),
     attachments: vine
       .array(

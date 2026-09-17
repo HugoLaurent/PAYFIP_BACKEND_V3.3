@@ -5,6 +5,9 @@ import { fetchWithTimeout } from '#services/fetch_with_timeout'
 export interface SendMailParams {
   template: string
   to: string
+  // Choisit la clé API AREGIE Mail du service plutôt que la clé par
+  // défaut — absent pour les emails sans service (OTP).
+  serviceId?: string
   data: Record<string, unknown>
 }
 

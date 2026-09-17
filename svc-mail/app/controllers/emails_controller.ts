@@ -19,6 +19,7 @@ export default class EmailsController {
       await EmailDelivery.create({
         template: payload.template,
         toEmail: payload.to,
+        serviceId: payload.serviceId ?? null,
         data: payload.data,
         attachments: payload.attachments ?? null,
         status: 'fake',
@@ -30,6 +31,7 @@ export default class EmailsController {
     const delivery = await EmailDelivery.create({
       template: payload.template,
       toEmail: payload.to,
+      serviceId: payload.serviceId ?? null,
       data: payload.data,
       attachments: payload.attachments ?? null,
       status: 'pending',

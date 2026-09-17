@@ -17,6 +17,9 @@ export interface MailAttachment {
 export interface SendMailParams {
   template: string
   to: string
+  // Choisit la clé API AREGIE Mail du service plutôt que la clé par
+  // défaut — absent pour les emails sans service (OTP).
+  serviceId?: string
   data: Record<string, unknown>
   attachments?: MailAttachment[]
 }

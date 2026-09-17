@@ -26,6 +26,7 @@ export async function sendInvoiceConfirmationEmail(invoice: Invoice): Promise<vo
     await sendMail({
       template: 'invoice_confirmation',
       to: invoice.payerEmail,
+      serviceId: invoice.serviceId ? String(invoice.serviceId) : undefined,
       data: {
         confirmation: invoice.paymentReference ?? String(invoice.id),
         objectLabel: invoice.objectLabel,
