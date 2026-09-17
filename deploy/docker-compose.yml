@@ -158,6 +158,9 @@ services:
       PORT: "3339"
       DB_HOST: postgres
       DB_PORT: "5432"
+      # Lecture de la clé API AREGIE Mail propre à un service — voir
+      # svc-mail/app/services/svc_auth_client.ts.
+      SVC_AUTH_BASE_URL: http://svc-auth:3334
     networks:
       - payfip-internal
 
