@@ -11,3 +11,9 @@ export const listEmailsStaffValidator = vine.compile(
     perPage: vine.number().positive().max(100).optional(),
   })
 )
+
+export const updateAregieMailApiKeyValidator = vine.compile(
+  vine.object({
+    apiKey: vine.string().trim().minLength(10),
+  })
+)
