@@ -121,7 +121,8 @@ export default class OrdersController {
     const recentOrdersAll: Order[] = []
 
     for (const serviceId of targetServiceIds) {
-      const { orders, scannedCount, recentOrders } = await runOnTenant(serviceId, async () => {
+      const { orders, scannedCount, monthRefundedCents, prevMonthRefundedCents, recentOrders } =
+        await runOnTenant(serviceId, async () => {
         const orders = await Order.query()
           .where('orgId', orgId)
           .where('status', 'confirmed')
@@ -137,16 +138,50 @@ export default class OrdersController {
           .count('* as total')
           .first()
 
+        // Remboursements déclarés (voir tickets_controller.ts#refund) — à
+        // déduire du chiffre d'affaires affiché, l'argent étant rendu hors
+        // plateforme mais bien parti de la caisse de l'organisme. Ne
+        // corrige que les deux totaux mensuels (le plus consulté) : la
+        // ventilation par service et la sparkline restent brutes pour
+        // l'instant, ordre de grandeur suffisant pour ces deux affichages
+        // secondaires.
+        const monthRefunded = await db
+          .from('tickets')
+          .where('org_id', orgId)
+          .where('service_id', serviceId)
+          .whereNotNull('refunded_at')
+          .where('refunded_at', '>=', monthStart.toSQL()!)
+          .sum('price_at_purchase_cents as total')
+          .first()
+
+        const prevMonthRefunded = await db
+          .from('tickets')
+          .where('org_id', orgId)
+          .where('service_id', serviceId)
+          .whereNotNull('refunded_at')
+          .where('refunded_at', '>=', prevMonthStart.toSQL()!)
+          .where('refunded_at', '<', monthStart.toSQL()!)
+          .sum('price_at_purchase_cents as total')
+          .first()
+
         const recentOrders = await Order.query()
           .where('orgId', orgId)
           .where('status', 'confirmed')
           .orderBy('createdAt', 'desc')
           .limit(8)
 
-        return { orders, scannedCount: Number(scanStats?.total ?? 0), recentOrders }
+        return {
+          orders,
+          scannedCount: Number(scanStats?.total ?? 0),
+          monthRefundedCents: Number(monthRefunded?.total ?? 0),
+          prevMonthRefundedCents: Number(prevMonthRefunded?.total ?? 0),
+          recentOrders,
+        }
       })
 
       monthTicketsScanned += scannedCount
+      monthRevenueCents -= monthRefundedCents
+      prevMonthRevenueCents -= prevMonthRefundedCents
       recentOrdersAll.push(...recentOrders)
 
       for (const o of orders) {
@@ -263,6 +298,7 @@ export default class OrdersController {
           paymentMethod: order.paymentMethod,
           soldBy: order.soldBy,
           consumedCount: order.tickets.filter((t) => t.status === 'consumed').length,
+          refundedCount: order.tickets.filter((t) => t.status === 'refunded').length,
           retryCount: order.retryCount,
           tickets: order.tickets.map((t) => ({
             id: t.id,
@@ -270,6 +306,9 @@ export default class OrdersController {
             status: t.status,
             consumedAt: t.consumedAt?.toISO() ?? null,
             consumedByLabel: t.consumedByLabel,
+            refundedAt: t.refundedAt?.toISO() ?? null,
+            refundedByLabel: t.refundedByLabel,
+            refundReason: t.refundReason,
           })),
         })),
         meta: orders.getMeta(),

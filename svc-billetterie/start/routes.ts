@@ -59,6 +59,7 @@ router
     router.get('/orders/:id/tickets/:ticketId/pdf', [OrdersController, 'ticketPdf'])
     router.post('/tickets/scan', [TicketsController, 'scan'])
     router.post('/tickets/:id/reset-scan', [TicketsController, 'resetScan'])
+    router.post('/tickets/:id/refund', [TicketsController, 'refund'])
     router.get('/scans', [TicketsController, 'index'])
   })
   .use(middleware.internalAuth())

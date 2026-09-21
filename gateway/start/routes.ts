@@ -202,6 +202,7 @@ router
     router.post('/billetterie/tickets/scan', [BilletterieAgentsController, 'scanTicket'])
     router.post('/billetterie/orders/scan', [BilletterieAgentsController, 'scanOrder'])
     router.post('/billetterie/tickets/:id/reset-scan', [BilletterieAgentsController, 'resetScan'])
+    router.post('/billetterie/tickets/:id/refund', [BilletterieAgentsController, 'refundTicket'])
     router.get('/billetterie/scans', [BilletterieAgentsController, 'listScans'])
     router.get('/billetterie/services/:id/tariffs', [BilletterieAgentsController, 'listTariffs'])
     router.post('/billetterie/services/:id/tariffs', [BilletterieAgentsController, 'createTariff'])

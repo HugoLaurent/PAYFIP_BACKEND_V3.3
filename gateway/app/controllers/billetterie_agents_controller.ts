@@ -147,6 +147,26 @@ export default class BilletterieAgentsController {
     })
   }
 
+  /** POST /billetterie/tickets/:id/refund — déclare un billet remboursé (hors PayFiP, voir svc-billetterie). */
+  async refundTicket(ctx: HttpContext) {
+    const { orgId, userId, role, services, email, firstName, lastName } = ctx.clientAuth
+    await proxyRequest(ctx, {
+      targetUrl: `${base()}/tickets/${ctx.params.id}/refund`,
+      jwt: {
+        orgId: String(orgId),
+        scope: 'billetterie',
+        sub: String(userId),
+        role,
+        servicePermissions: buildServicePermissions(services),
+        serviceIds: services.map((s) => s.id),
+        agentEmail: email,
+        agentFirstName: firstName,
+        agentLastName: lastName,
+        aud: 'svc-billetterie',
+      },
+    })
+  }
+
   /** GET /billetterie/scans — historique des scans d'un service, le plus récent en premier. */
   async listScans(ctx: HttpContext) {
     const { orgId, userId, role, services } = ctx.clientAuth

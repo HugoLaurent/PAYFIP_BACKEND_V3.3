@@ -6,6 +6,15 @@ export const scanTicketValidator = vine.compile(
   })
 )
 
+// Déclaration d'un remboursement fait hors plateforme (voir
+// tickets_controller.ts#refund) — reason obligatoire pour la traçabilité
+// comptable, même exigence que le motif de rejet côté inscription.
+export const refundTicketValidator = vine.compile(
+  vine.object({
+    reason: vine.string().trim().minLength(1).maxLength(500),
+  })
+)
+
 export const listScansValidator = vine.compile(
   vine.object({
     serviceId: vine.number().positive(),

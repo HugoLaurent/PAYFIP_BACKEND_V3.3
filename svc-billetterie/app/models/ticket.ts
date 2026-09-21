@@ -42,6 +42,18 @@ export default class Ticket extends TenantBaseModel {
   @column()
   declare consumedByLabel: string | null
 
+  @column.dateTime()
+  declare refundedAt: DateTime | null
+
+  @column()
+  declare refundedBy: number | null
+
+  @column()
+  declare refundedByLabel: string | null
+
+  @column()
+  declare refundReason: string | null
+
   @column.dateTime({ autoCreate: true })
   declare createdAt: DateTime
 

@@ -3,7 +3,7 @@ import type { HttpContext } from '@adonisjs/core/http'
 import db from '@adonisjs/lucid/services/db'
 import Ticket from '#models/ticket'
 import Scan, { type ScanResult } from '#models/scan'
-import { scanTicketValidator, listScansValidator } from '#validators/scan_ticket'
+import { scanTicketValidator, listScansValidator, refundTicketValidator } from '#validators/scan_ticket'
 import { decodeTicketCode } from '#services/ticket_code_service'
 import { encodeOrderCode } from '#services/order_code_service'
 import { agentLabel } from '#services/agent_label_service'
@@ -197,6 +197,76 @@ export default class TicketsController {
 
     return ctx.response.send({
       data: { id: ticket.id, tariffType: ticket.tariffType, visitDate: ticket.visitDate.toISODate() },
+    })
+  }
+
+  /**
+   * POST /tickets/:id/refund — déclare un remboursement fait hors
+   * plateforme (voir migration 1794100000000) : aucun appel à PayFiP,
+   * juste une trace de qui/quand/pourquoi. Autorisé depuis 'issued' ou
+   * 'consumed' (un billet déjà scanné reste remboursable), jamais depuis
+   * un statut déjà terminal.
+   */
+  async refund(ctx: HttpContext) {
+    const { orgId, role, servicePermissions, serviceIds, sub } = ctx.internalAuth
+
+    if (!sub) {
+      return ctx.response.status(403).send({ error: 'agent_id_missing_in_token' })
+    }
+    const agentId = Number(sub)
+    const label = agentLabel(ctx.internalAuth)
+
+    const payload = await ctx.request.validateUsing(refundTicketValidator)
+
+    const ticket = await findTicketInOrg(Number(orgId), Number(ctx.params.id))
+    if (!ticket) {
+      return ctx.response.status(404).send({ error: 'ticket_not_found' })
+    }
+
+    if (!serviceIds?.includes(ticket.serviceId)) {
+      return ctx.response.status(403).send({ error: 'service_not_allowed_for_agent' })
+    }
+
+    if (role !== 'admin' && !servicePermissions?.[String(ticket.serviceId)]?.canScan) {
+      return ctx.response.status(403).send({ error: 'permission_required' })
+    }
+
+    if (!['issued', 'consumed'].includes(ticket.status)) {
+      return ctx.response.status(409).send({ error: 'ticket_not_refundable', ticketStatus: ticket.status })
+    }
+
+    const rows = await runOnTenant(ticket.serviceId, () =>
+      db
+        .connection(connectionNameFor(ticket.serviceId))
+        .from('tickets')
+        .where('id', ticket.id)
+        .whereIn('status', ['issued', 'consumed'])
+        .update(
+          {
+            status: 'refunded',
+            refunded_at: DateTime.now().toSQL(),
+            refunded_by: agentId,
+            refunded_by_label: label,
+            refund_reason: payload.reason,
+            updated_at: DateTime.now().toSQL(),
+          },
+          ['*']
+        )
+    )
+
+    if (rows.length === 0) {
+      return ctx.response.status(409).send({ error: 'ticket_not_refundable', ticketStatus: ticket.status })
+    }
+
+    return ctx.response.send({
+      data: {
+        id: ticket.id,
+        tariffType: ticket.tariffType,
+        status: 'refunded',
+        refundedAt: rows[0].refunded_at,
+        refundedByLabel: label,
+        refundReason: payload.reason,
+      },
     })
   }
 
