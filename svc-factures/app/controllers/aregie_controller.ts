@@ -2,7 +2,7 @@ import type { HttpContext } from '@adonisjs/core/http'
 import { DateTime } from 'luxon'
 import Invoice from '#models/invoice'
 import { depositInvoicesValidator, acknowledgeCollectionValidator } from '#validators/aregie'
-import { resolveByNumcli } from '#services/svc_auth_client'
+import { resolveByLinkCode } from '#services/svc_auth_client'
 import { runOnTenant, runOnAllTenants } from '#services/tenant_connection_service'
 
 export default class AregieController {
@@ -21,12 +21,24 @@ export default class AregieController {
     const skipped: { reference: string; reason: string }[] = []
 
     for (const line of invoices) {
-      // Chaque ligne ne porte que le numcli — jamais l'organisme ou le
-      // serviceId directement, qu'on ne veut pas laisser AREGIE affirmer
-      // lui-même.
-      const resolved = await resolveByNumcli(line.numcli)
+      // Chaque ligne porte le link_code (propre au service, unique) —
+      // jamais l'organisme ou le serviceId directement, qu'on ne veut pas
+      // laisser AREGIE affirmer lui-même. Le numcli reste envoyé par
+      // AREGIE mais ne sert plus qu'à un garde-fou de cohérence juste en
+      // dessous : il peut désormais être partagé entre plusieurs services.
+      const resolved = await resolveByLinkCode(line.linkCode)
       if (!resolved) {
-        skipped.push({ reference: line.hospitalReference, reason: 'numcli_unknown' })
+        skipped.push({ reference: line.hospitalReference, reason: 'link_code_unknown' })
+        continue
+      }
+
+      if (resolved.numcli !== line.numcli) {
+        // Le link_code a résolu vers un service dont le numcli enregistré
+        // ne correspond pas à celui envoyé sur cette ligne — signe d'une
+        // config désynchronisée côté AREGIE plutôt qu'une vraie ligne à
+        // router : on préfère l'écarter explicitement qu'écrire une
+        // facture au mauvais endroit.
+        skipped.push({ reference: line.hospitalReference, reason: 'numcli_mismatch' })
         continue
       }
 

@@ -9,24 +9,31 @@ export interface ResolvedService {
   name: string
 }
 
+export interface ResolvedServiceByLinkCode extends ResolvedService {
+  numcli: string | null
+}
+
 /**
- * Résout à quel organisme/service appartient un numcli — utilisé lors
- * d'un dépôt AREGIE, où chaque ligne ne porte que le numcli, jamais
- * l'organisme directement. `orgId: '0'` est un jeton neutre : cet appel
- * n'a pas encore d'organisme connu, c'est justement ce qu'il sert à
- * découvrir.
+ * Résout à quel organisme/service appartient un link_code — utilisé lors
+ * d'un dépôt AREGIE, où chaque ligne porte désormais le link_code propre
+ * au service en plus du numcli (qui, lui, peut être partagé entre
+ * plusieurs services d'un même organisme, voir services_controller.ts
+ * côté svc-auth). `orgId: '0'` est un jeton neutre : cet appel n'a pas
+ * encore d'organisme connu, c'est justement ce qu'il sert à découvrir.
  */
-export async function resolveByNumcli(numcli: string): Promise<ResolvedService | null> {
+export async function resolveByLinkCode(
+  linkCode: string
+): Promise<ResolvedServiceByLinkCode | null> {
   const token = await mintFacturesJwt({ orgId: '0', scope: 'factures', aud: 'svc-auth' })
 
   const response = await fetchWithTimeout(
-    `${env.get('SVC_AUTH_BASE_URL')}/services/by-numcli/${encodeURIComponent(numcli)}`,
+    `${env.get('SVC_AUTH_BASE_URL')}/services/by-link-code/${encodeURIComponent(linkCode)}`,
     { headers: { Authorization: `Bearer ${token}` } }
   )
 
   if (!response.ok) return null
 
-  const { data } = (await response.json()) as { data: ResolvedService }
+  const { data } = (await response.json()) as { data: ResolvedServiceByLinkCode }
   return data
 }
 

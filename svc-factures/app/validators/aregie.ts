@@ -5,14 +5,20 @@ export const depositInvoicesValidator = vine.compile(
     invoices: vine
       .array(
         vine.object({
-          // Format AREGIE : NUMCLI;REFFACTURE;ETAT;MONTANT;DATE. Jamais
-          // serviceId (notre id interne) : le numcli est résolu vers
-          // l'organisme/service côté svc-auth au moment du dépôt.
+          // Format AREGIE : NUMCLI;REFFACTURE;ETAT;MONTANT;DATE, plus le
+          // link_code propre au service (configuré côté AREGIE à la
+          // création du service — voir services_controller.ts#byLinkCode).
+          // Jamais serviceId (notre id interne) : c'est le link_code qui
+          // est résolu vers l'organisme/service côté svc-auth au moment du
+          // dépôt — le numcli, lui, peut être partagé entre plusieurs
+          // services d'un même organisme, donc plus utilisé pour router,
+          // seulement revérifié (voir aregie_controller.ts#deposit).
           // objectLabel n'est pas fourni par AREGIE — généré à partir du
           // nom du service résolu (jamais un libellé métier potentiellement
           // sensible fourni tel quel). clientNumber n'est plus alimenté
           // par ce format, la colonne reste en base pour compatibilité.
           numcli: vine.string().trim().minLength(1),
+          linkCode: vine.string().trim().minLength(1),
           hospitalReference: vine.string().trim().minLength(1), // REFFACTURE
           aregieStatus: vine.string().trim().minLength(1), // ETAT
           amountCents: vine.number().positive(), // MONTANT

@@ -1,4 +1,5 @@
 import { readFile } from 'node:fs/promises'
+import { randomBytes } from 'node:crypto'
 import { DateTime } from 'luxon'
 import type { HttpContext } from '@adonisjs/core/http'
 import vine from '@vinejs/vine'
@@ -42,6 +43,7 @@ const SERVICE_LIST_COLUMNS = [
   'serviceType',
   'status',
   'numcli',
+  'linkCode',
   'slug',
   'logoMimeType',
   'coverImageMimeType',
@@ -59,6 +61,7 @@ function serializeService(s: Service) {
     serviceType: s.serviceType,
     status: s.status,
     numcli: s.numcli,
+    linkCode: s.linkCode,
     slug: s.slug,
     hasLogo: s.logoMimeType !== null,
     hasCoverImage: s.coverImageMimeType !== null,
@@ -93,6 +96,28 @@ function slugify(value: string): string {
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '')
+}
+
+// Sans 0/O/1/I/L, ambigus à recopier à la main — c'est un code que Hugo
+// transmettra lui-même à AREGIE (voir byLinkCode()).
+const LINK_CODE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'
+
+function generateLinkCode(): string {
+  const bytes = randomBytes(8)
+  let code = ''
+  for (let i = 0; i < 8; i++) {
+    code += LINK_CODE_ALPHABET[bytes[i] % LINK_CODE_ALPHABET.length]
+  }
+  return code
+}
+
+async function uniqueLinkCode(): Promise<string> {
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const code = generateLinkCode()
+    const existing = await Service.findBy('linkCode', code)
+    if (!existing) return code
+  }
+  throw new Error('link_code_generation_failed')
 }
 
 export default class ServicesController {
@@ -211,10 +236,11 @@ export default class ServicesController {
 
     const payload = await ctx.request.validateUsing(createServiceValidator)
 
-    const existingNumcli = await Service.findBy('numcli', payload.numcli)
-    if (existingNumcli) {
-      return ctx.response.status(409).send({ error: 'numcli_already_used' })
-    }
+    // Le numcli n'a plus besoin d'être unique : un organisme peut vouloir
+    // qu'une même régie (numcli) couvre plusieurs services (ex. deux
+    // billetteries facturées via le même circuit comptable) — voir
+    // link_code, qui lui reste unique et sert à désambiguïser côté AREGIE.
+    const linkCode = await uniqueLinkCode()
 
     let slug =
       payload.slug ??
@@ -237,6 +263,7 @@ export default class ServicesController {
       serviceType: payload.serviceType,
       status: 'active',
       numcli: payload.numcli,
+      linkCode,
       saisieMode: payload.saisieMode ?? 'T',
       slug,
     })
@@ -248,6 +275,8 @@ export default class ServicesController {
         name: service.name,
         serviceType: service.serviceType,
         status: service.status,
+        numcli: service.numcli,
+        linkCode: service.linkCode,
         slug: service.slug,
       },
     })
@@ -586,13 +615,14 @@ export default class ServicesController {
   }
 
   /**
-   * GET /services/by-numcli/:numcli — résout l'organisme et le service à
-   * partir d'un numcli. Appelé exclusivement par svc-billetterie et
-   * svc-factures lors d'un dépôt AREGIE : AREGIE ne fournit qu'un numcli
-   * dans chaque ligne (jamais un orgId directement), c'est à nous de
-   * retrouver à qui il appartient — numcli est unique sur toute la base
-   * (contrainte vérifiée dans store()), donc la résolution est sans
-   * ambiguïté.
+   * GET /services/by-numcli/:numcli — résout l'organisme (et un service)
+   * à partir d'un numcli. Un numcli peut désormais être partagé entre
+   * plusieurs services d'un même organisme (voir link_code) : cette route
+   * renvoie alors le PREMIER service trouvé, sans garantie sur lequel —
+   * utilisable uniquement quand seul l'orgId compte (c'est le cas de
+   * svc-billetterie : les budget codes sont un concept d'organisme, pas de
+   * service). svc-factures, qui route vraiment vers UN service précis,
+   * utilise byLinkCode() à la place, jamais celle-ci.
    */
   async byNumcli(ctx: HttpContext) {
     if (!['billetterie', 'factures'].includes(ctx.internalAuth.scope)) {
@@ -610,6 +640,37 @@ export default class ServicesController {
         serviceId: service.id,
         status: service.status,
         name: service.name,
+      },
+    })
+  }
+
+  /**
+   * GET /services/by-link-code/:linkCode — résout SANS ambiguïté
+   * l'organisme et le service exact visé par une ligne de dépôt AREGIE.
+   * Contrairement au numcli (qui peut être partagé entre plusieurs
+   * services), link_code est unique par service — c'est nous qui le
+   * générons à la création (voir store()) et Hugo qui le transmet à
+   * AREGIE, pour que chaque ligne le renvoie en plus du numcli.
+   * Réservé à svc-factures : c'est le seul appelant qui a besoin de
+   * router précisément vers UN service (écriture dans sa base tenant).
+   */
+  async byLinkCode(ctx: HttpContext) {
+    if (ctx.internalAuth.scope !== 'factures') {
+      return ctx.response.status(403).send({ error: 'scope_not_allowed' })
+    }
+
+    const service = await Service.findBy('linkCode', ctx.params.linkCode)
+    if (!service) {
+      return ctx.response.status(404).send({ error: 'link_code_not_found' })
+    }
+
+    return ctx.response.send({
+      data: {
+        orgId: service.orgId,
+        serviceId: service.id,
+        status: service.status,
+        name: service.name,
+        numcli: service.numcli,
       },
     })
   }

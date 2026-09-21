@@ -36,6 +36,7 @@ router
     router.get('/services/:id/status', [ServicesController, 'status'])
     router.get('/services/:id/label', [ServicesController, 'label'])
     router.get('/services/by-numcli/:numcli', [ServicesController, 'byNumcli'])
+    router.get('/services/by-link-code/:linkCode', [ServicesController, 'byLinkCode'])
     router.get('/tenant-databases/:appName', [TenantDatabasesController, 'index'])
     router.post('/tenant-databases', [TenantDatabasesController, 'store'])
     router.patch('/tenant-databases/:id/status', [TenantDatabasesController, 'updateStatus'])

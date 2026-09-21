@@ -28,6 +28,14 @@ export default class Service extends BaseModel {
   @column()
   declare numcli: string | null
 
+  // Identifiant technique unique par service, distinct du numcli (qui,
+  // lui, peut être partagé entre plusieurs services — voir migration
+  // add_link_code_to_services). Transmis à AREGIE pour qu'il l'inclue dans
+  // chaque ligne de dépôt, seule façon de désambiguïser sans ambiguïté
+  // quel service précis est visé.
+  @column()
+  declare linkCode: string
+
   @column()
   declare saisieMode: SaisieMode
 
