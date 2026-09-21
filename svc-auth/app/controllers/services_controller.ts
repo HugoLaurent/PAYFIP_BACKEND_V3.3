@@ -864,6 +864,28 @@ export default class ServicesController {
   }
 
   /**
+   * DELETE /services/:id/aregie-mail-key — retire la clé propre au
+   * service : les envois retombent sur la clé par défaut (voir
+   * resolveApiKey dans aregie_mail_settings_service.ts côté svc-mail),
+   * jamais d'échec silencieux.
+   */
+  async deleteAregieMailKey(ctx: HttpContext) {
+    if (ctx.internalAuth.scope !== 'staff') {
+      return ctx.response.status(403).send({ error: 'scope_not_allowed' })
+    }
+
+    const service = await Service.find(Number(ctx.params.id))
+    if (!service) {
+      return ctx.response.status(404).send({ error: 'service_not_found' })
+    }
+
+    service.aregieMailApiKeyEnc = null
+    await service.save()
+
+    return ctx.response.send({ data: await aregieMailKeyStatus(service) })
+  }
+
+  /**
    * GET /internal/services/:id/aregie-mail-key — seule route qui déchiffre
    * la clé API AREGIE Mail d'un service, réservée à svc-mail au moment
    * d'un envoi (voir svc-mail/svc_auth_client.ts). `apiKey: null` si le

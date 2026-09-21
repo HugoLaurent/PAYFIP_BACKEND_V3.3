@@ -151,4 +151,11 @@ export default class StaffController {
       jwt: { orgId: '', scope: 'staff', aud: 'svc-auth' },
     })
   }
+
+  async deleteServiceAregieMailKey(ctx: HttpContext) {
+    await proxyRequest(ctx, {
+      targetUrl: `${auth()}/services/${ctx.params.id}/aregie-mail-key`,
+      jwt: { orgId: '', scope: 'staff', aud: 'svc-auth' },
+    })
+  }
 }

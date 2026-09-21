@@ -49,6 +49,7 @@ router
     router.patch('/services/:id', [ServicesController, 'update'])
     router.get('/services/:id/aregie-mail-key', [ServicesController, 'showAregieMailKey'])
     router.put('/services/:id/aregie-mail-key', [ServicesController, 'updateAregieMailKey'])
+    router.delete('/services/:id/aregie-mail-key', [ServicesController, 'deleteAregieMailKey'])
     router.get('/internal/services/:id/aregie-mail-key', [
       ServicesController,
       'internalAregieMailKey',
