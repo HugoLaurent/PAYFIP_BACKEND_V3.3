@@ -242,6 +242,11 @@ router
       InscriptionAgentsController,
       'pendingReviewCount',
     ])
+    router.get('/inscription/notifications', [InscriptionAgentsController, 'notifications'])
+    router.post('/inscription/notifications/mark-read', [
+      InscriptionAgentsController,
+      'markNotificationsRead',
+    ])
   })
   .use(middleware.clientAuth())
 

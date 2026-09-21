@@ -1,6 +1,8 @@
 import { DateTime } from 'luxon'
+import Event from '#models/event'
 import Registration from '#models/registration'
 import { promoteNextWaitlisted } from '#services/waitlist_service'
+import { notifyAgent } from '#services/agent_notification_service'
 import { refreshTenantRegistry } from '#services/tenant_registry_client'
 import { runOnAllTenants } from '#services/tenant_connection_service'
 
@@ -79,6 +81,9 @@ export async function processRegistrationExpirations(): Promise<ExpirySweepResul
       await registration.save()
       result.expiredWaitlistOffers += 1
       await promoteNextWaitlisted(registration.eventId)
+
+      const event = await Event.find(registration.eventId)
+      if (event) await notifyAgent('waitlist_offer_expired', registration, event)
     }
 
     return result

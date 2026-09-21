@@ -28,6 +28,9 @@ router
     router.get('/events', [EventsController, 'index'])
     // Avant '/events/:id' : sinon ':id' capture "pending-review-count".
     router.get('/events/pending-review-count', [EventsController, 'pendingReviewCount'])
+    // Même raison : avant '/events/:id'.
+    router.get('/events/notifications', [EventsController, 'notifications'])
+    router.post('/events/notifications/mark-read', [EventsController, 'markNotificationsRead'])
     router.get('/events/by-slug/:slug', [EventsController, 'showBySlug'])
     router.get('/events/:id', [EventsController, 'show'])
     router.post('/services/:id/events', [EventsController, 'store'])

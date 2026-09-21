@@ -38,6 +38,16 @@ export const FAILED_REGISTRATION_MAIL_KINDS = [
   'event_cancelled',
 ] as const
 
+// Événements notifiables à l'agent (voir agent_notifications_service.ts) —
+// jamais posés pour une action de l'agent lui-même, seulement pour une
+// action du citoyen ou une expiration automatique.
+export const AGENT_NOTIFICATION_TYPES = [
+  'registration_cancelled',
+  'waitlist_offer_accepted',
+  'waitlist_offer_declined',
+  'waitlist_offer_expired',
+] as const
+
 export const FORM_FIELD_TYPES = [
   'short_text',
   'long_text',

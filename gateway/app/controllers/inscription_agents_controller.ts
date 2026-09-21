@@ -191,4 +191,36 @@ export default class InscriptionAgentsController {
       },
     })
   }
+
+  /** GET /inscription/notifications — flux d'activité (annulations, réponses liste d'attente). */
+  async notifications(ctx: HttpContext) {
+    const { orgId, role, services } = ctx.clientAuth
+    await proxyRequest(ctx, {
+      targetUrl: `${base()}/events/notifications`,
+      jwt: {
+        orgId: String(orgId),
+        scope: 'inscription',
+        role,
+        servicePermissions: buildServicePermissions(services),
+        serviceIds: services.map((s) => s.id),
+        aud: 'svc-inscription',
+      },
+    })
+  }
+
+  /** POST /inscription/notifications/mark-read */
+  async markNotificationsRead(ctx: HttpContext) {
+    const { orgId, role, services } = ctx.clientAuth
+    await proxyRequest(ctx, {
+      targetUrl: `${base()}/events/notifications/mark-read`,
+      jwt: {
+        orgId: String(orgId),
+        scope: 'inscription',
+        role,
+        servicePermissions: buildServicePermissions(services),
+        serviceIds: services.map((s) => s.id),
+        aud: 'svc-inscription',
+      },
+    })
+  }
 }

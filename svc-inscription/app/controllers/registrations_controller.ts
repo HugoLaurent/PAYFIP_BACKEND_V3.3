@@ -24,6 +24,7 @@ import { paymentWebhookValidator } from '#validators/payment_webhook'
 import { isEmailVerified } from '#services/otp_service'
 import { checkCapacity } from '#services/capacity_service'
 import { promoteNextWaitlisted } from '#services/waitlist_service'
+import { notifyAgent } from '#services/agent_notification_service'
 import {
   createPaymentRequest,
   retryPaymentRequest,
@@ -828,11 +829,14 @@ export default class RegistrationsController {
         return ctx.response.status(422).send({ error: 'registration_deadline_passed' })
       }
 
+      const wasWaitlisted = registration.status === 'waitlisted'
+
       registration.status = 'cancelled'
       registration.cancelledAt = DateTime.now()
       await registration.save()
 
       await promoteNextWaitlisted(event.id)
+      await notifyAgent(wasWaitlisted ? 'waitlist_offer_declined' : 'registration_cancelled', registration, event)
 
       return ctx.response.send({ data: { status: registration.status } })
     })
@@ -862,6 +866,8 @@ export default class RegistrationsController {
         registration.waitlistPosition = null
         registration.waitlistNotifiedAt = null
         registration.waitlistResponseDeadline = null
+
+        await notifyAgent('waitlist_offer_accepted', registration, event)
 
         if (eventRequiresDocuments(event)) {
           registration.status = 'awaiting_review'

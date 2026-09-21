@@ -7,10 +7,17 @@ import { createEventValidator, updateEventValidator, listEventsAgentValidator } 
 import { computeSeatsHeld } from '#services/capacity_service'
 import { sendEventCancelledEmail } from '#services/registration_mail_service'
 import { runOnTenant, ensureTenantConnections } from '#services/tenant_connection_service'
+import { getUnreadNotifications, markNotificationsRead } from '#services/agent_notification_service'
 
 const publicListValidator = vine.compile(
   vine.object({
     serviceId: vine.number().positive(),
+  })
+)
+
+const markNotificationsReadValidator = vine.compile(
+  vine.object({
+    ids: vine.array(vine.number().positive()).minLength(1),
   })
 )
 
@@ -252,6 +259,56 @@ export default class EventsController {
     const count = breakdown.reduce((sum, r) => sum + r.count, 0)
 
     return ctx.response.send({ data: { count, events: breakdown } })
+  }
+
+  /**
+   * GET /events/notifications — flux d'activité non lu (annulations
+   * citoyennes, réponses aux offres de liste d'attente) pour tous les
+   * services inscription de l'agent, voir agent_notification_service.ts.
+   * Même fan-out que pendingReviewCount.
+   */
+  async notifications(ctx: HttpContext) {
+    const { orgId, serviceIds } = ctx.internalAuth
+    if (!serviceIds || serviceIds.length === 0) {
+      return ctx.response.send({ data: { count: 0, notifications: [] } })
+    }
+
+    const inscriptionServiceIds = await ensureTenantConnections(serviceIds)
+
+    const perService = await Promise.all(
+      inscriptionServiceIds.map((serviceId) =>
+        runOnTenant(serviceId, () => getUnreadNotifications(orgId, serviceId))
+      )
+    )
+
+    const notifications = perService
+      .flat()
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+
+    return ctx.response.send({ data: { count: notifications.length, notifications } })
+  }
+
+  /**
+   * POST /events/notifications/mark-read — marque des notifications comme
+   * lues (ids reçus sans distinction de service : chaque tenant ignore
+   * silencieusement les ids qui ne lui appartiennent pas).
+   */
+  async markNotificationsRead(ctx: HttpContext) {
+    const { orgId, serviceIds } = ctx.internalAuth
+    if (!serviceIds || serviceIds.length === 0) {
+      return ctx.response.send({ data: { success: true } })
+    }
+
+    const { ids } = await markNotificationsReadValidator.validate(ctx.request.body())
+    const inscriptionServiceIds = await ensureTenantConnections(serviceIds)
+
+    await Promise.all(
+      inscriptionServiceIds.map((serviceId) =>
+        runOnTenant(serviceId, () => markNotificationsRead(orgId, serviceId, ids))
+      )
+    )
+
+    return ctx.response.send({ data: { success: true } })
   }
 
   /**
