@@ -69,6 +69,7 @@ router
     ])
     router.post('/registrations/:id/review', [RegistrationsController, 'review'])
     router.post('/registrations/:id/resend-reminder', [RegistrationsController, 'resendReminder'])
+    router.post('/registrations/:id/cancel', [RegistrationsController, 'cancel'])
     router.get('/registrations/:id/documents/:documentId', [
       RegistrationsController,
       'downloadDocument',

@@ -234,6 +234,10 @@ router
       InscriptionAgentsController,
       'resendReminder',
     ])
+    router.post('/inscription/registrations/:id/cancel', [
+      InscriptionAgentsController,
+      'cancelRegistration',
+    ])
     router.get('/inscription/pending-review-count', [
       InscriptionAgentsController,
       'pendingReviewCount',

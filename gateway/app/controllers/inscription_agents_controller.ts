@@ -159,6 +159,23 @@ export default class InscriptionAgentsController {
     })
   }
 
+  /** POST /inscription/registrations/:id/cancel?serviceId= — annulation côté agent. */
+  async cancelRegistration(ctx: HttpContext) {
+    const { orgId, role, services } = ctx.clientAuth
+    await proxyRequest(ctx, {
+      targetUrl: `${base()}/registrations/${ctx.params.id}/cancel`,
+      jwt: {
+        orgId: String(orgId),
+        scope: 'inscription',
+        role,
+        servicePermissions: buildServicePermissions(services),
+        serviceIds: services.map((s) => s.id),
+        aud: 'svc-inscription',
+      },
+      forwardQueryString: true,
+    })
+  }
+
   /** GET /inscription/pending-review-count — badge de notification global. */
   async pendingReviewCount(ctx: HttpContext) {
     const { orgId, role, services } = ctx.clientAuth

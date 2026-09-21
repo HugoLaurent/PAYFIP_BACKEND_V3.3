@@ -1363,6 +1363,49 @@ export default class RegistrationsController {
   }
 
   /**
+   * POST /registrations/:id/cancel?serviceId= — annulation côté agent
+   * (l'inscrit a demandé par un autre canal, ex. téléphone/guichet, ou
+   * no-show à retirer). Même transition d'état que cancelByToken
+   * (self-service citoyen) : pas de vérification de délai d'inscription
+   * (un agent doit pouvoir annuler même après la deadline, contrairement
+   * au citoyen), pas d'email envoyé au citoyen non plus (comme
+   * cancelByToken).
+   */
+  async cancel(ctx: HttpContext) {
+    const { orgId, role, servicePermissions, serviceIds } = ctx.internalAuth
+    const { serviceId } = await serviceIdQueryValidator.validate(ctx.request.qs())
+
+    if (!serviceIds?.includes(serviceId)) {
+      return ctx.response.status(403).send({ error: 'service_not_allowed_for_agent' })
+    }
+
+    return runOnTenant(serviceId, async () => {
+      const registration = await Registration.query()
+        .where('id', Number(ctx.params.id))
+        .where('orgId', orgId)
+        .where('serviceId', serviceId)
+        .first()
+      if (!registration) return ctx.response.status(404).send({ error: 'registration_not_found' })
+
+      if (role !== 'admin' && !servicePermissions?.[String(registration.serviceId)]?.canScan) {
+        return ctx.response.status(403).send({ error: 'permission_required' })
+      }
+
+      if (['cancelled', 'expired'].includes(registration.status)) {
+        return ctx.response.status(409).send({ error: 'registration_already_terminal' })
+      }
+
+      registration.status = 'cancelled'
+      registration.cancelledAt = DateTime.now()
+      await registration.save()
+
+      await promoteNextWaitlisted(registration.eventId)
+
+      return ctx.response.send({ data: serializeRegistrationForAgent(registration) })
+    })
+  }
+
+  /**
    * GET /registrations/:id/documents/:documentId?serviceId= — stream du
    * blob, réservé à canScan ou canViewHistory sur le service de
    * l'inscription.
