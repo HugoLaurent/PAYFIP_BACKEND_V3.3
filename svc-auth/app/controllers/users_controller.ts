@@ -40,6 +40,7 @@ function serializeUser(u: User) {
         ? u.assignments.map((a) => ({
             id: a.serviceId,
             name: a.service.name,
+            serviceType: a.service.serviceType,
             permissions: {
               canSell: a.canSell,
               canScan: a.canScan,
