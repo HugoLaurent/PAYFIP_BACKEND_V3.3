@@ -11,6 +11,11 @@ export interface InscriptionConfirmationEmailData {
   quantity: number
   amountCents: number
   registrationNumber: string
+  // Lien front (InscriptionReturnPage) portant l'accessToken — permet au
+  // citoyen de revoir sa réservation et de l'annuler plus tard, sans avoir
+  // à conserver ce mail. Voir buildFrontUrl côté
+  // registration_mail_service.ts.
+  manageUrl: string
   // Identité du service émetteur (logo + nom), pas AREGIE — voir
   // ticket_confirmation_mail_template.ts. Absents si svc-auth était
   // injoignable au moment de l'envoi.
@@ -103,7 +108,17 @@ export function renderInscriptionConfirmationEmail(data: InscriptionConfirmation
             </table>
           </td></tr>
 
-          <tr><td align="center" style="padding:24px 32px 28px; font-size:13px; line-height:20px; color:#7b8189;">Conservez ce numéro d'inscription pour toute question.</td></tr>
+          <tr><td align="center" style="padding:24px 32px 0;">
+            <table cellpadding="0" cellspacing="0" border="0">
+              <tr>
+                <td align="center" style="border-radius:10px; border:1.5px solid ${AREGIE_BLUE};">
+                  <a href="${escapeHtml(data.manageUrl)}" style="display:inline-block; padding:12px 28px; font-size:14px; font-weight:700; color:${AREGIE_BLUE}; text-decoration:none;">Voir / annuler mon inscription</a>
+                </td>
+              </tr>
+            </table>
+          </td></tr>
+
+          <tr><td align="center" style="padding:20px 32px 28px; font-size:13px; line-height:20px; color:#7b8189;">Conservez ce numéro d'inscription pour toute question.</td></tr>
 
           <tr><td align="right" style="padding:24px 32px; background-color:#f2f5fb; border-top:1px solid #dee1e7; font-size:12px; line-height:19px; color:#7b8189;">${
             data.orgName || data.serviceName

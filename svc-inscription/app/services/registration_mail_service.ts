@@ -121,6 +121,7 @@ export async function sendRegistrationConfirmationEmail(
         quantity: registration.quantity,
         amountCents: registration.priceCentsAtRegistration,
         registrationNumber: registration.paymentReference ?? String(registration.id),
+        manageUrl: buildFrontUrl(identity.slug, registration.serviceId, registration.accessToken!, registration.orgId),
         serviceName: identity.name,
         orgName: identity.orgName,
         logoUrl: identity.logoUrl,

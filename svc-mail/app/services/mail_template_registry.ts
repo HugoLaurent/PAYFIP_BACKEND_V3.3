@@ -69,6 +69,10 @@ const inscriptionConfirmationValidator = vine.compile(
     quantity: vine.number().positive(),
     amountCents: vine.number().min(0),
     registrationNumber: vine.string().trim().minLength(1),
+    // Lien front portant l'accessToken de l'inscription (voir payUrl
+    // ci-dessous) — permet au citoyen de revoir/annuler son inscription
+    // depuis l'email de confirmation.
+    manageUrl: vine.string().trim().url(),
     serviceName: vine.string().trim().optional(),
     orgName: vine.string().trim().optional(),
     logoUrl: vine.string().trim().url({ require_tld: false }).optional(),
