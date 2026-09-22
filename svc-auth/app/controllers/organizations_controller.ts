@@ -72,6 +72,47 @@ export default class OrganizationsController {
     return ctx.response.send({ data: serializeOrganization(organization) })
   }
 
+  /**
+   * DELETE /organizations/:id — staff only. Suppression LOGIQUE
+   * uniquement (status: 'deleted') : aucune base tenant ni ligne
+   * physiquement supprimée — voir ORGANIZATION_STATUSES. 'deleted' n'est
+   * atteignable QUE depuis ici, jamais via update() (son validateur
+   * n'accepte que active/suspended), et seulement depuis un organisme
+   * déjà suspendu : deux verrous avant un geste aussi lourd. Une fois
+   * 'deleted', ni update() ni cette route ne permettent d'y revenir —
+   * un vrai retour arrière passerait par la base, jamais par l'API,
+   * comme toute action réellement destructrice cette session.
+   *
+   * status !== 'active' bloque déjà tout (login, pages publiques,
+   * paiement — voir auth_controller.ts, profile_controller.ts,
+   * services_controller.ts, orders_controller.ts, payment_requests_
+   * controller.ts) : rien d'autre à changer pour que 'deleted' coupe
+   * immédiatement tout accès, exactement comme 'suspended' le fait déjà.
+   */
+  async destroy(ctx: HttpContext) {
+    if (ctx.internalAuth.scope !== 'staff') {
+      return ctx.response.status(403).send({ error: 'scope_not_allowed' })
+    }
+
+    const organization = await Organization.find(Number(ctx.params.id))
+    if (!organization) {
+      return ctx.response.status(404).send({ error: 'organization_not_found' })
+    }
+
+    if (organization.status === 'deleted') {
+      return ctx.response.status(409).send({ error: 'organization_already_deleted' })
+    }
+
+    if (organization.status !== 'suspended') {
+      return ctx.response.status(409).send({ error: 'organization_must_be_suspended_first' })
+    }
+
+    organization.status = 'deleted'
+    await organization.save()
+
+    return ctx.response.status(204).send('')
+  }
+
   async store(ctx: HttpContext) {
     if (ctx.internalAuth.scope !== 'staff') {
       return ctx.response.status(403).send({ error: 'scope_not_allowed' })

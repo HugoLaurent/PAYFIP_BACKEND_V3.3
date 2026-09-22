@@ -44,6 +44,7 @@ router
     router.get('/organizations', [OrganizationsController, 'index'])
     router.post('/organizations', [OrganizationsController, 'store'])
     router.patch('/organizations/:id', [OrganizationsController, 'update'])
+    router.delete('/organizations/:id', [OrganizationsController, 'destroy'])
     router.post('/organizations/:id/services', [ServicesController, 'store'])
     router.get('/services', [ServicesController, 'index'])
     router.get('/services/:id', [ServicesController, 'show'])

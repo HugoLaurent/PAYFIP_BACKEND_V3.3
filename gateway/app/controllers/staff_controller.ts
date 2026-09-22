@@ -31,6 +31,13 @@ export default class StaffController {
     })
   }
 
+  async deleteOrganization(ctx: HttpContext) {
+    await proxyRequest(ctx, {
+      targetUrl: `${auth()}/organizations/${ctx.params.id}`,
+      jwt: { orgId: '', scope: 'staff', aud: 'svc-auth' },
+    })
+  }
+
   async createService(ctx: HttpContext) {
     await proxyRequest(ctx, {
       targetUrl: `${auth()}/organizations/${ctx.params.id}/services`,

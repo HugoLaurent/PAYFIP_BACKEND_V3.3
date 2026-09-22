@@ -256,6 +256,7 @@ router
     router.get('/staff/organizations', [StaffController, 'listOrganizations'])
     router.post('/staff/organizations', [StaffController, 'createOrganization'])
     router.patch('/staff/organizations/:id', [StaffController, 'updateOrganization'])
+    router.delete('/staff/organizations/:id', [StaffController, 'deleteOrganization'])
     router.post('/staff/organizations/:id/services', [StaffController, 'createService'])
     router.get('/staff/services', [StaffController, 'listServices'])
     router.patch('/staff/services/:id', [StaffController, 'updateService'])
