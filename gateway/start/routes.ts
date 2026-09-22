@@ -266,6 +266,7 @@ router
     router.post('/staff/services/:id/logo', [StaffController, 'uploadServiceLogo'])
     router.post('/staff/services/:id/cover', [StaffController, 'uploadServiceCover'])
     router.delete('/staff/services/:id/cover', [StaffController, 'deleteServiceCover'])
+    router.get('/staff/tariffs', [StaffController, 'listTariffs'])
     router.post('/staff/services/:id/tariffs', [StaffController, 'createTariff'])
     router.patch('/staff/tariffs/:id', [StaffController, 'updateTariff'])
     router.delete('/staff/tariffs/:id', [StaffController, 'deleteTariff'])

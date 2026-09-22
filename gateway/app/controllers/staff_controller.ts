@@ -103,6 +103,14 @@ export default class StaffController {
     })
   }
 
+  async listTariffs(ctx: HttpContext) {
+    await proxyRequest(ctx, {
+      targetUrl: `${billetterie()}/tariffs`,
+      jwt: { orgId: '', scope: 'staff', aud: 'svc-billetterie' },
+      forwardQueryString: true,
+    })
+  }
+
   async createTariff(ctx: HttpContext) {
     await proxyRequest(ctx, {
       targetUrl: `${billetterie()}/services/${ctx.params.id}/tariffs`,

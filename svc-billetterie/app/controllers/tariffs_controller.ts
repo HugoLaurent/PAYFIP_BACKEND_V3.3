@@ -94,12 +94,14 @@ export default class TariffsController {
    */
   async index(ctx: HttpContext) {
     const { serviceId, includeArchived } = await queryValidator.validate(ctx.request.qs())
-    const { orgId, role, servicePermissions } = ctx.internalAuth
+    const { orgId, role, servicePermissions, scope } = ctx.internalAuth
+    const isStaff = scope === 'staff'
 
-    const canManage = role === 'admin' || servicePermissions?.[String(serviceId)]?.canManageTariffs === true
+    const canManage = isStaff || role === 'admin' || servicePermissions?.[String(serviceId)]?.canManageTariffs === true
 
     const tariffs = await runOnTenant(serviceId, () => {
-      const query = Tariff.query().where('orgId', Number(orgId)).where('serviceId', serviceId)
+      const query = Tariff.query().where('serviceId', serviceId)
+      if (!isStaff) query.where('orgId', Number(orgId))
       if (!includeArchived || !canManage) {
         query.where('status', 'active')
       }
