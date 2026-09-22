@@ -1,7 +1,7 @@
 import type { HttpContext } from '@adonisjs/core/http'
 import BudgetCode from '#models/budget_code'
 import { depositBudgetCodesValidator } from '#validators/aregie'
-import { resolveByNumcli } from '#services/svc_auth_client'
+import { resolveByLinkCode } from '#services/svc_auth_client'
 
 export default class AregieController {
   async deposit(ctx: HttpContext) {
@@ -12,23 +12,31 @@ export default class AregieController {
     const skipped: { numcli: string; code: string; reason: string }[] = []
 
     for (const line of codes) {
-      // Chaque ligne ne porte que le numcli — jamais l'organisme
-      // directement, qu'on ne veut pas laisser AREGIE affirmer lui-même.
-      const resolved = await resolveByNumcli(line.numcli)
+      // Chaque ligne porte le link_code (propre au service, unique) —
+      // jamais l'organisme ou le serviceId directement, qu'on ne veut pas
+      // laisser AREGIE affirmer lui-même. Le numcli reste envoyé par
+      // AREGIE mais ne sert plus qu'à un garde-fou de cohérence juste en
+      // dessous : il peut désormais être partagé entre plusieurs services.
+      const resolved = await resolveByLinkCode(line.linkCode)
       if (!resolved) {
-        skipped.push({ numcli: line.numcli, code: line.code, reason: 'numcli_unknown' })
+        skipped.push({ numcli: line.numcli, code: line.code, reason: 'link_code_unknown' })
+        continue
+      }
+
+      if (resolved.numcli !== line.numcli) {
+        skipped.push({ numcli: line.numcli, code: line.code, reason: 'numcli_mismatch' })
         continue
       }
 
       const existing = await BudgetCode.query()
-        .where('orgId', resolved.orgId)
-        .where('numcli', line.numcli)
+        .where('serviceId', resolved.serviceId)
         .where('code', line.code)
         .first()
 
       if (!existing) {
         await BudgetCode.create({
           orgId: resolved.orgId,
+          serviceId: resolved.serviceId,
           numcli: line.numcli,
           code: line.code,
           label: line.label,

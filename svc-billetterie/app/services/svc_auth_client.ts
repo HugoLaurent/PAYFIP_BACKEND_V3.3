@@ -42,6 +42,37 @@ export async function resolveByNumcli(numcli: string): Promise<ResolvedService |
   return data
 }
 
+export interface ResolvedServiceByLinkCode extends ResolvedService {
+  numcli: string | null
+}
+
+/**
+ * Résout à quel service précis appartient un link_code — utilisé pour le
+ * dépôt de codes budgétaires : un numcli peut être partagé entre
+ * plusieurs services d'un même organisme (voir services_controller.ts
+ * côté svc-auth), donc lui seul ne suffit plus à savoir à quel service un
+ * code budgétaire est destiné.
+ */
+export async function resolveByLinkCode(linkCode: string): Promise<ResolvedServiceByLinkCode | null> {
+  const privateKey = await privateKeyPromise
+  const token = await new SignJWT({ orgId: '0', scope: 'billetterie' })
+    .setProtectedHeader({ alg: 'EdDSA', kid: 'svc-billetterie' })
+    .setIssuedAt()
+    .setExpirationTime('2m')
+    .setAudience('svc-auth')
+    .sign(privateKey)
+
+  const response = await fetchWithTimeout(
+    `${env.get('SVC_AUTH_BASE_URL')}/services/by-link-code/${encodeURIComponent(linkCode)}`,
+    { headers: { Authorization: `Bearer ${token}` } }
+  )
+
+  if (!response.ok) return null
+
+  const { data } = (await response.json()) as { data: ResolvedServiceByLinkCode }
+  return data
+}
+
 export interface ServiceClosurePeriod {
   startDate: string
   endDate: string

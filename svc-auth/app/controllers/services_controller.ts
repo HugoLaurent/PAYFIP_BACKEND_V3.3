@@ -651,11 +651,12 @@ export default class ServicesController {
    * services), link_code est unique par service — c'est nous qui le
    * générons à la création (voir store()) et Hugo qui le transmet à
    * AREGIE, pour que chaque ligne le renvoie en plus du numcli.
-   * Réservé à svc-factures : c'est le seul appelant qui a besoin de
-   * router précisément vers UN service (écriture dans sa base tenant).
+   * Réservé à svc-factures et svc-billetterie : les deux routent
+   * désormais un dépôt AREGIE vers UN service précis (facture dans sa
+   * base tenant, code budgétaire rattaché à un service donné).
    */
   async byLinkCode(ctx: HttpContext) {
-    if (ctx.internalAuth.scope !== 'factures') {
+    if (!['billetterie', 'factures'].includes(ctx.internalAuth.scope)) {
       return ctx.response.status(403).send({ error: 'scope_not_allowed' })
     }
 

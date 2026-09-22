@@ -8,6 +8,13 @@ export default class BudgetCode extends BaseModel {
   @column()
   declare orgId: number
 
+  // Service précis auquel ce code budgétaire est destiné — résolu via
+  // link_code au moment du dépôt (voir aregie_controller.ts#deposit).
+  // Nullable pour les lignes déposées avant ce champ, jamais réutilisées
+  // par listBudgetCodes()/store() (filtrées par serviceId).
+  @column()
+  declare serviceId: number | null
+
   @column()
   declare numcli: string
 

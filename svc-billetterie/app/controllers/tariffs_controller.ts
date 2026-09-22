@@ -41,7 +41,7 @@ async function findTariffForAgent(
 export default class TariffsController {
   async listBudgetCodes(ctx: HttpContext) {
     const { orgId, role, servicePermissions, serviceIds } = ctx.internalAuth
-    const { numcli, serviceId } = await ctx.request.validateUsing(listBudgetCodesValidator)
+    const { serviceId } = await ctx.request.validateUsing(listBudgetCodesValidator)
 
     if (!serviceIds?.includes(serviceId)) {
       return ctx.response.status(403).send({ error: 'service_not_allowed_for_agent' })
@@ -51,11 +51,14 @@ export default class TariffsController {
       return ctx.response.status(403).send({ error: 'permission_required' })
     }
 
-    // BudgetCode reste app-local (pas de serviceId, unique sur
-    // (orgId, numcli, code)) — pas de runOnTenant ici.
+    // BudgetCode reste app-local (pas de tenant) — pas de runOnTenant
+    // ici. Filtré par serviceId, pas numcli : un numcli peut être partagé
+    // entre plusieurs services d'un même organisme (voir link_code côté
+    // svc-auth), les codes budgétaires d'un autre service ne doivent
+    // jamais apparaître ici même s'ils partagent le même numcli.
     const codes = await BudgetCode.query()
       .where('orgId', Number(orgId))
-      .where('numcli', numcli)
+      .where('serviceId', serviceId)
       .orderBy('code')
 
     return ctx.response.send({
@@ -120,10 +123,11 @@ export default class TariffsController {
 
       // BudgetCode reste app-local — lu hors du contexte tenant, mais
       // l'écriture du Tariff qui le référence, elle, doit rester dans
-      // runOnTenant().
+      // runOnTenant(). Filtré par serviceId, pas numcli : voir
+      // listBudgetCodes() ci-dessus pour le raisonnement complet.
       const budgetCode = await BudgetCode.query()
         .where('orgId', Number(orgId))
-        .where('numcli', payload.numcli)
+        .where('serviceId', serviceId)
         .where('code', payload.budgetCode)
         .first()
 
