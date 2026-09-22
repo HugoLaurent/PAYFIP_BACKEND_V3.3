@@ -715,8 +715,9 @@ export default class ServicesController {
    * d'exception agent contrairement à update() (toggle de statut).
    */
   async uploadLogo(ctx: HttpContext) {
-    const { orgId, role } = ctx.internalAuth
-    if (role !== 'admin') {
+    const { orgId, role, scope } = ctx.internalAuth
+    const isStaff = scope === 'staff'
+    if (!isStaff && role !== 'admin') {
       return ctx.response.status(403).send({ error: 'permission_required' })
     }
 
@@ -725,11 +726,9 @@ export default class ServicesController {
     // toute façon écraser logoData juste après — pas la peine de faire
     // transiter l'éventuelle image de couverture (parfois volumineuse)
     // pour rien.
-    const service = await Service.query()
-      .select('id', 'orgId')
-      .where('id', Number(ctx.params.id))
-      .where('orgId', Number(orgId))
-      .first()
+    const serviceQuery = Service.query().select('id', 'orgId').where('id', Number(ctx.params.id))
+    if (!isStaff) serviceQuery.where('orgId', Number(orgId))
+    const service = await serviceQuery.first()
 
     if (!service) {
       return ctx.response.status(404).send({ error: 'service_not_found' })
@@ -793,16 +792,15 @@ export default class ServicesController {
    * "logo".
    */
   async uploadCoverImage(ctx: HttpContext) {
-    const { orgId, role } = ctx.internalAuth
-    if (role !== 'admin') {
+    const { orgId, role, scope } = ctx.internalAuth
+    const isStaff = scope === 'staff'
+    if (!isStaff && role !== 'admin') {
       return ctx.response.status(403).send({ error: 'permission_required' })
     }
 
-    const service = await Service.query()
-      .select('id', 'orgId')
-      .where('id', Number(ctx.params.id))
-      .where('orgId', Number(orgId))
-      .first()
+    const serviceQuery = Service.query().select('id', 'orgId').where('id', Number(ctx.params.id))
+    if (!isStaff) serviceQuery.where('orgId', Number(orgId))
+    const service = await serviceQuery.first()
 
     if (!service) {
       return ctx.response.status(404).send({ error: 'service_not_found' })
@@ -862,16 +860,15 @@ export default class ServicesController {
    * d'achat citoyenne).
    */
   async deleteCoverImage(ctx: HttpContext) {
-    const { orgId, role } = ctx.internalAuth
-    if (role !== 'admin') {
+    const { orgId, role, scope } = ctx.internalAuth
+    const isStaff = scope === 'staff'
+    if (!isStaff && role !== 'admin') {
       return ctx.response.status(403).send({ error: 'permission_required' })
     }
 
-    const service = await Service.query()
-      .select('id', 'orgId')
-      .where('id', Number(ctx.params.id))
-      .where('orgId', Number(orgId))
-      .first()
+    const serviceQuery = Service.query().select('id', 'orgId').where('id', Number(ctx.params.id))
+    if (!isStaff) serviceQuery.where('orgId', Number(orgId))
+    const service = await serviceQuery.first()
 
     if (!service) {
       return ctx.response.status(404).send({ error: 'service_not_found' })

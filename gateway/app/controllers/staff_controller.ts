@@ -1,6 +1,6 @@
 import type { HttpContext } from '@adonisjs/core/http'
 import env from '#start/env'
-import { proxyRequest } from '#services/proxy_service'
+import { proxyRequest, proxyUpload } from '#services/proxy_service'
 
 const auth = () => env.get('SVC_AUTH_BASE_URL')
 const billetterie = () => env.get('SVC_BILLETTERIE_BASE_URL')
@@ -70,6 +70,28 @@ export default class StaffController {
   async deleteServiceClosure(ctx: HttpContext) {
     await proxyRequest(ctx, {
       targetUrl: `${auth()}/services/${ctx.params.id}/closures/${ctx.params.closureId}`,
+      jwt: { orgId: '', scope: 'staff', aud: 'svc-auth' },
+    })
+  }
+
+  async uploadServiceLogo(ctx: HttpContext) {
+    await proxyUpload(ctx, {
+      targetUrl: `${auth()}/services/${ctx.params.id}/logo`,
+      jwt: { orgId: '', scope: 'staff', aud: 'svc-auth' },
+    })
+  }
+
+  async uploadServiceCover(ctx: HttpContext) {
+    await proxyUpload(ctx, {
+      targetUrl: `${auth()}/services/${ctx.params.id}/cover`,
+      jwt: { orgId: '', scope: 'staff', aud: 'svc-auth' },
+      fileFieldName: 'cover',
+    })
+  }
+
+  async deleteServiceCover(ctx: HttpContext) {
+    await proxyRequest(ctx, {
+      targetUrl: `${auth()}/services/${ctx.params.id}/cover`,
       jwt: { orgId: '', scope: 'staff', aud: 'svc-auth' },
     })
   }
