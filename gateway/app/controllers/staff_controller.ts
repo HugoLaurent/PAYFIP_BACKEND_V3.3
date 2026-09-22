@@ -96,6 +96,37 @@ export default class StaffController {
     })
   }
 
+  async createTariff(ctx: HttpContext) {
+    await proxyRequest(ctx, {
+      targetUrl: `${billetterie()}/services/${ctx.params.id}/tariffs`,
+      jwt: { orgId: '', scope: 'staff', aud: 'svc-billetterie' },
+    })
+  }
+
+  async updateTariff(ctx: HttpContext) {
+    await proxyRequest(ctx, {
+      targetUrl: `${billetterie()}/tariffs/${ctx.params.id}`,
+      jwt: { orgId: '', scope: 'staff', aud: 'svc-billetterie' },
+      forwardQueryString: true,
+    })
+  }
+
+  async deleteTariff(ctx: HttpContext) {
+    await proxyRequest(ctx, {
+      targetUrl: `${billetterie()}/tariffs/${ctx.params.id}`,
+      jwt: { orgId: '', scope: 'staff', aud: 'svc-billetterie' },
+      forwardQueryString: true,
+    })
+  }
+
+  async listBudgetCodesForService(ctx: HttpContext) {
+    await proxyRequest(ctx, {
+      targetUrl: `${billetterie()}/budget-codes`,
+      jwt: { orgId: '', scope: 'staff', aud: 'svc-billetterie' },
+      forwardQueryString: true,
+    })
+  }
+
   async listUsers(ctx: HttpContext) {
     await proxyRequest(ctx, {
       targetUrl: `${auth()}/users`,

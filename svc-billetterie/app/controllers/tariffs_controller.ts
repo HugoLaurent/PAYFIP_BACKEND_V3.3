@@ -8,11 +8,23 @@ import {
   updateTariffValidator,
 } from '#validators/tariff'
 import { runOnTenant, ensureTenantConnections } from '#services/tenant_connection_service'
+import { getTenantConfig } from '#services/tenant_registry_client'
 
 const queryValidator = vine.compile(
   vine.object({
     serviceId: vine.number().positive(),
     includeArchived: vine.boolean().optional(),
+  })
+)
+
+// Staff : le JWT ne porte ni orgId ni serviceIds (support tous
+// organismes confondus) — le service visé vient explicitement de la
+// requête, et son orgId réel est résolu depuis l'annuaire tenant
+// (déjà en cache, alimenté par tenant_registry_client.ts) plutôt que
+// fait confiance au JWT.
+const staffServiceIdValidator = vine.compile(
+  vine.object({
+    serviceId: vine.number().positive(),
   })
 )
 
@@ -40,15 +52,23 @@ async function findTariffForAgent(
 
 export default class TariffsController {
   async listBudgetCodes(ctx: HttpContext) {
-    const { orgId, role, servicePermissions, serviceIds } = ctx.internalAuth
+    const { orgId, role, servicePermissions, serviceIds, scope } = ctx.internalAuth
+    const isStaff = scope === 'staff'
     const { serviceId } = await ctx.request.validateUsing(listBudgetCodesValidator)
 
-    if (!serviceIds?.includes(serviceId)) {
-      return ctx.response.status(403).send({ error: 'service_not_allowed_for_agent' })
-    }
-
-    if (role !== 'admin' && !servicePermissions?.[String(serviceId)]?.canManageTariffs) {
-      return ctx.response.status(403).send({ error: 'permission_required' })
+    let resolvedOrgId: number
+    if (isStaff) {
+      const config = await getTenantConfig(serviceId)
+      if (!config) return ctx.response.status(404).send({ error: 'service_not_found' })
+      resolvedOrgId = config.orgId
+    } else {
+      if (!serviceIds?.includes(serviceId)) {
+        return ctx.response.status(403).send({ error: 'service_not_allowed_for_agent' })
+      }
+      if (role !== 'admin' && !servicePermissions?.[String(serviceId)]?.canManageTariffs) {
+        return ctx.response.status(403).send({ error: 'permission_required' })
+      }
+      resolvedOrgId = Number(orgId)
     }
 
     // BudgetCode vit désormais en tenant (voir tenant_base_model.ts) :
@@ -57,7 +77,7 @@ export default class TariffsController {
     // organisme, voir link_code côté svc-auth) — la base tenant elle-même
     // garantit qu'on ne voit jamais les codes d'un autre service.
     const codes = await runOnTenant(serviceId, () =>
-      BudgetCode.query().where('orgId', Number(orgId)).where('serviceId', serviceId).orderBy('code')
+      BudgetCode.query().where('orgId', resolvedOrgId).where('serviceId', serviceId).orderBy('code')
     )
 
     return ctx.response.send({
@@ -97,21 +117,29 @@ export default class TariffsController {
   }
 
   async store(ctx: HttpContext) {
-    const { orgId, role, servicePermissions, serviceIds } = ctx.internalAuth
+    const { orgId, role, servicePermissions, serviceIds, scope } = ctx.internalAuth
+    const isStaff = scope === 'staff'
     const payload = await ctx.request.validateUsing(createTariffValidator)
     const serviceId = Number(ctx.params.id)
 
-    if (!serviceIds?.includes(serviceId)) {
-      return ctx.response.status(403).send({ error: 'service_not_allowed_for_agent' })
-    }
-
-    if (role !== 'admin' && !servicePermissions?.[String(serviceId)]?.canManageTariffs) {
-      return ctx.response.status(403).send({ error: 'permission_required' })
+    let resolvedOrgId: number
+    if (isStaff) {
+      const config = await getTenantConfig(serviceId)
+      if (!config) return ctx.response.status(404).send({ error: 'service_not_found' })
+      resolvedOrgId = config.orgId
+    } else {
+      if (!serviceIds?.includes(serviceId)) {
+        return ctx.response.status(403).send({ error: 'service_not_allowed_for_agent' })
+      }
+      if (role !== 'admin' && !servicePermissions?.[String(serviceId)]?.canManageTariffs) {
+        return ctx.response.status(403).send({ error: 'permission_required' })
+      }
+      resolvedOrgId = Number(orgId)
     }
 
     return runOnTenant(serviceId, async () => {
       const existing = await Tariff.query()
-        .where('orgId', orgId)
+        .where('orgId', resolvedOrgId)
         .where('serviceId', serviceId)
         .where('tariffType', payload.tariffType)
         .first()
@@ -125,7 +153,7 @@ export default class TariffsController {
       // runOnTenant(). Filtré par serviceId, pas numcli : voir
       // listBudgetCodes() ci-dessus pour le raisonnement complet.
       const budgetCode = await BudgetCode.query()
-        .where('orgId', Number(orgId))
+        .where('orgId', resolvedOrgId)
         .where('serviceId', serviceId)
         .where('code', payload.budgetCode)
         .first()
@@ -135,7 +163,7 @@ export default class TariffsController {
       }
 
       const tariff = await Tariff.create({
-        orgId: Number(orgId),
+        orgId: resolvedOrgId,
         serviceId,
         tariffType: payload.tariffType,
         priceCents: payload.priceCents,
@@ -150,18 +178,25 @@ export default class TariffsController {
   }
 
   async update(ctx: HttpContext) {
-    const { orgId, role, servicePermissions, serviceIds } = ctx.internalAuth
+    const { orgId, role, servicePermissions, serviceIds, scope } = ctx.internalAuth
+    const isStaff = scope === 'staff'
 
-    if (!serviceIds) {
-      return ctx.response.status(403).send({ error: 'service_not_allowed_for_agent' })
+    let tariff: Tariff | null
+    if (isStaff) {
+      const { serviceId } = await staffServiceIdValidator.validate(ctx.request.qs())
+      tariff = await runOnTenant(serviceId, () => Tariff.find(Number(ctx.params.id)))
+    } else {
+      if (!serviceIds) {
+        return ctx.response.status(403).send({ error: 'service_not_allowed_for_agent' })
+      }
+      tariff = await findTariffForAgent(orgId, serviceIds, Number(ctx.params.id))
     }
 
-    const tariff = await findTariffForAgent(orgId, serviceIds, Number(ctx.params.id))
     if (!tariff) {
       return ctx.response.status(404).send({ error: 'tariff_not_found' })
     }
 
-    if (role !== 'admin' && !servicePermissions?.[String(tariff.serviceId)]?.canManageTariffs) {
+    if (!isStaff && role !== 'admin' && !servicePermissions?.[String(tariff.serviceId)]?.canManageTariffs) {
       return ctx.response.status(403).send({ error: 'permission_required' })
     }
 
@@ -192,18 +227,25 @@ export default class TariffsController {
    * l'historique.
    */
   async destroy(ctx: HttpContext) {
-    const { orgId, role, servicePermissions, serviceIds } = ctx.internalAuth
+    const { orgId, role, servicePermissions, serviceIds, scope } = ctx.internalAuth
+    const isStaff = scope === 'staff'
 
-    if (!serviceIds) {
-      return ctx.response.status(403).send({ error: 'service_not_allowed_for_agent' })
+    let tariff: Tariff | null
+    if (isStaff) {
+      const { serviceId } = await staffServiceIdValidator.validate(ctx.request.qs())
+      tariff = await runOnTenant(serviceId, () => Tariff.find(Number(ctx.params.id)))
+    } else {
+      if (!serviceIds) {
+        return ctx.response.status(403).send({ error: 'service_not_allowed_for_agent' })
+      }
+      tariff = await findTariffForAgent(orgId, serviceIds, Number(ctx.params.id))
     }
 
-    const tariff = await findTariffForAgent(orgId, serviceIds, Number(ctx.params.id))
     if (!tariff) {
       return ctx.response.status(404).send({ error: 'tariff_not_found' })
     }
 
-    if (role !== 'admin' && !servicePermissions?.[String(tariff.serviceId)]?.canManageTariffs) {
+    if (!isStaff && role !== 'admin' && !servicePermissions?.[String(tariff.serviceId)]?.canManageTariffs) {
       return ctx.response.status(403).send({ error: 'permission_required' })
     }
 
