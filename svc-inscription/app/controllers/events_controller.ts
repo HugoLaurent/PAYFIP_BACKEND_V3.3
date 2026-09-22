@@ -8,6 +8,7 @@ import { computeSeatsHeld } from '#services/capacity_service'
 import { sendEventCancelledEmail } from '#services/registration_mail_service'
 import { runOnTenant, ensureTenantConnections } from '#services/tenant_connection_service'
 import { getUnreadNotifications, markNotificationsRead } from '#services/agent_notification_service'
+import { getTenantConfig } from '#services/tenant_registry_client'
 
 const publicListValidator = vine.compile(
   vine.object({
@@ -371,14 +372,23 @@ export default class EventsController {
    * l'agent gestionnaire du service.
    */
   async store(ctx: HttpContext) {
-    const { orgId, role, servicePermissions, serviceIds } = ctx.internalAuth
+    const { orgId, role, servicePermissions, serviceIds, scope } = ctx.internalAuth
+    const isStaff = scope === 'staff'
     const serviceId = Number(ctx.params.id)
 
-    if (!serviceIds?.includes(serviceId)) {
-      return ctx.response.status(403).send({ error: 'service_not_allowed_for_agent' })
-    }
-    if (role !== 'admin' && !servicePermissions?.[String(serviceId)]?.canManageTariffs) {
-      return ctx.response.status(403).send({ error: 'permission_required' })
+    let resolvedOrgId: number
+    if (isStaff) {
+      const config = await getTenantConfig(serviceId)
+      if (!config) return ctx.response.status(404).send({ error: 'service_not_found' })
+      resolvedOrgId = config.orgId
+    } else {
+      if (!serviceIds?.includes(serviceId)) {
+        return ctx.response.status(403).send({ error: 'service_not_allowed_for_agent' })
+      }
+      if (role !== 'admin' && !servicePermissions?.[String(serviceId)]?.canManageTariffs) {
+        return ctx.response.status(403).send({ error: 'permission_required' })
+      }
+      resolvedOrgId = Number(orgId)
     }
 
     const payload = await ctx.request.validateUsing(createEventValidator)
@@ -386,16 +396,16 @@ export default class EventsController {
     return runOnTenant(serviceId, async () => {
       if (payload.slug) {
         const collision = await Event.query()
-          .where('orgId', orgId)
+          .where('orgId', resolvedOrgId)
           .where('serviceId', serviceId)
           .where('slug', payload.slug)
           .first()
         if (collision) return ctx.response.status(409).send({ error: 'slug_already_used' })
       }
-      const slug = payload.slug ?? (await resolveUniqueSlug(Number(orgId), serviceId, payload.title))
+      const slug = payload.slug ?? (await resolveUniqueSlug(resolvedOrgId, serviceId, payload.title))
 
       const event = await Event.create({
-        orgId: Number(orgId),
+        orgId: resolvedOrgId,
         serviceId,
         type: payload.type,
         slug,
@@ -427,24 +437,25 @@ export default class EventsController {
    * recalculé depuis `title`).
    */
   async update(ctx: HttpContext) {
-    const { orgId, role, servicePermissions, serviceIds } = ctx.internalAuth
+    const { orgId, role, servicePermissions, serviceIds, scope } = ctx.internalAuth
+    const isStaff = scope === 'staff'
     const { serviceId } = await serviceIdQueryValidator.validate(ctx.request.qs())
 
-    if (!serviceIds?.includes(serviceId)) {
-      return ctx.response.status(403).send({ error: 'service_not_allowed_for_agent' })
-    }
-    if (role !== 'admin' && !servicePermissions?.[String(serviceId)]?.canManageTariffs) {
-      return ctx.response.status(403).send({ error: 'permission_required' })
+    if (!isStaff) {
+      if (!serviceIds?.includes(serviceId)) {
+        return ctx.response.status(403).send({ error: 'service_not_allowed_for_agent' })
+      }
+      if (role !== 'admin' && !servicePermissions?.[String(serviceId)]?.canManageTariffs) {
+        return ctx.response.status(403).send({ error: 'permission_required' })
+      }
     }
 
     const payload = await ctx.request.validateUsing(updateEventValidator)
 
     return runOnTenant(serviceId, async () => {
-      const event = await Event.query()
-        .where('id', Number(ctx.params.id))
-        .where('orgId', orgId)
-        .where('serviceId', serviceId)
-        .first()
+      const eventQuery = Event.query().where('id', Number(ctx.params.id)).where('serviceId', serviceId)
+      if (!isStaff) eventQuery.where('orgId', orgId)
+      const event = await eventQuery.first()
       if (!event) {
         return ctx.response.status(404).send({ error: 'event_not_found' })
       }
@@ -458,7 +469,7 @@ export default class EventsController {
 
       if (payload.slug !== undefined && payload.slug !== event.slug) {
         const collision = await Event.query()
-          .where('orgId', orgId)
+          .where('orgId', event.orgId)
           .where('serviceId', event.serviceId)
           .where('slug', payload.slug)
           .whereNot('id', event.id)
@@ -498,22 +509,23 @@ export default class EventsController {
    * email d'annulation. Ne supprime aucune ligne.
    */
   async cancel(ctx: HttpContext) {
-    const { orgId, role, servicePermissions, serviceIds } = ctx.internalAuth
+    const { orgId, role, servicePermissions, serviceIds, scope } = ctx.internalAuth
+    const isStaff = scope === 'staff'
     const { serviceId } = await serviceIdQueryValidator.validate(ctx.request.qs())
 
-    if (!serviceIds?.includes(serviceId)) {
-      return ctx.response.status(403).send({ error: 'service_not_allowed_for_agent' })
-    }
-    if (role !== 'admin' && !servicePermissions?.[String(serviceId)]?.canManageTariffs) {
-      return ctx.response.status(403).send({ error: 'permission_required' })
+    if (!isStaff) {
+      if (!serviceIds?.includes(serviceId)) {
+        return ctx.response.status(403).send({ error: 'service_not_allowed_for_agent' })
+      }
+      if (role !== 'admin' && !servicePermissions?.[String(serviceId)]?.canManageTariffs) {
+        return ctx.response.status(403).send({ error: 'permission_required' })
+      }
     }
 
     return runOnTenant(serviceId, async () => {
-      const event = await Event.query()
-        .where('id', Number(ctx.params.id))
-        .where('orgId', orgId)
-        .where('serviceId', serviceId)
-        .first()
+      const eventQuery = Event.query().where('id', Number(ctx.params.id)).where('serviceId', serviceId)
+      if (!isStaff) eventQuery.where('orgId', orgId)
+      const event = await eventQuery.first()
       if (!event) {
         return ctx.response.status(404).send({ error: 'event_not_found' })
       }
@@ -554,22 +566,23 @@ export default class EventsController {
    * un évènement `archived`, `cancelled`, ou dont la date est déjà passée.
    */
   async destroy(ctx: HttpContext) {
-    const { orgId, role, servicePermissions, serviceIds } = ctx.internalAuth
+    const { orgId, role, servicePermissions, serviceIds, scope } = ctx.internalAuth
+    const isStaff = scope === 'staff'
     const { serviceId } = await serviceIdQueryValidator.validate(ctx.request.qs())
 
-    if (!serviceIds?.includes(serviceId)) {
-      return ctx.response.status(403).send({ error: 'service_not_allowed_for_agent' })
-    }
-    if (role !== 'admin' && !servicePermissions?.[String(serviceId)]?.canManageTariffs) {
-      return ctx.response.status(403).send({ error: 'permission_required' })
+    if (!isStaff) {
+      if (!serviceIds?.includes(serviceId)) {
+        return ctx.response.status(403).send({ error: 'service_not_allowed_for_agent' })
+      }
+      if (role !== 'admin' && !servicePermissions?.[String(serviceId)]?.canManageTariffs) {
+        return ctx.response.status(403).send({ error: 'permission_required' })
+      }
     }
 
     return runOnTenant(serviceId, async () => {
-      const event = await Event.query()
-        .where('id', Number(ctx.params.id))
-        .where('orgId', orgId)
-        .where('serviceId', serviceId)
-        .first()
+      const eventQuery = Event.query().where('id', Number(ctx.params.id)).where('serviceId', serviceId)
+      if (!isStaff) eventQuery.where('orgId', orgId)
+      const event = await eventQuery.first()
       if (!event) {
         return ctx.response.status(404).send({ error: 'event_not_found' })
       }

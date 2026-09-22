@@ -143,6 +143,37 @@ export default class StaffController {
     })
   }
 
+  async createEvent(ctx: HttpContext) {
+    await proxyRequest(ctx, {
+      targetUrl: `${inscription()}/services/${ctx.params.id}/events`,
+      jwt: { orgId: '', scope: 'staff', aud: 'svc-inscription' },
+    })
+  }
+
+  async updateEvent(ctx: HttpContext) {
+    await proxyRequest(ctx, {
+      targetUrl: `${inscription()}/events/${ctx.params.id}`,
+      jwt: { orgId: '', scope: 'staff', aud: 'svc-inscription' },
+      forwardQueryString: true,
+    })
+  }
+
+  async cancelEvent(ctx: HttpContext) {
+    await proxyRequest(ctx, {
+      targetUrl: `${inscription()}/events/${ctx.params.id}/cancel`,
+      jwt: { orgId: '', scope: 'staff', aud: 'svc-inscription' },
+      forwardQueryString: true,
+    })
+  }
+
+  async deleteEvent(ctx: HttpContext) {
+    await proxyRequest(ctx, {
+      targetUrl: `${inscription()}/events/${ctx.params.id}`,
+      jwt: { orgId: '', scope: 'staff', aud: 'svc-inscription' },
+      forwardQueryString: true,
+    })
+  }
+
   async listUsers(ctx: HttpContext) {
     await proxyRequest(ctx, {
       targetUrl: `${auth()}/users`,
