@@ -260,6 +260,8 @@ router
     router.post('/staff/organizations/:id/services', [StaffController, 'createService'])
     router.get('/staff/services', [StaffController, 'listServices'])
     router.patch('/staff/services/:id', [StaffController, 'updateService'])
+    router.post('/staff/services/:id/closures', [StaffController, 'createServiceClosure'])
+    router.delete('/staff/services/:id/closures/:closureId', [StaffController, 'deleteServiceClosure'])
     router.get('/staff/services/:id/aregie-mail-key', [StaffController, 'getServiceAregieMailKey'])
     router.put('/staff/services/:id/aregie-mail-key', [StaffController, 'updateServiceAregieMailKey'])
     router.delete('/staff/services/:id/aregie-mail-key', [StaffController, 'deleteServiceAregieMailKey'])

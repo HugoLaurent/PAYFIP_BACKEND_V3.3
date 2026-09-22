@@ -555,15 +555,15 @@ export default class ServicesController {
    * la même famille de bascule d'exploitation.
    */
   async createClosure(ctx: HttpContext) {
-    const { orgId, role, servicePermissions } = ctx.internalAuth
-    if (role !== 'admin' && !servicePermissions?.[ctx.params.id]?.canToggleService) {
+    const { orgId, role, servicePermissions, scope } = ctx.internalAuth
+    const isStaff = scope === 'staff'
+    if (!isStaff && role !== 'admin' && !servicePermissions?.[ctx.params.id]?.canToggleService) {
       return ctx.response.status(403).send({ error: 'permission_required' })
     }
 
-    const service = await Service.query()
-      .where('id', Number(ctx.params.id))
-      .where('orgId', Number(orgId))
-      .first()
+    const serviceQuery = Service.query().where('id', Number(ctx.params.id))
+    if (!isStaff) serviceQuery.where('orgId', Number(orgId))
+    const service = await serviceQuery.first()
     if (!service) {
       return ctx.response.status(404).send({ error: 'service_not_found' })
     }
@@ -588,15 +588,15 @@ export default class ServicesController {
    * fermeture (fin anticipée, erreur de saisie…).
    */
   async deleteClosure(ctx: HttpContext) {
-    const { orgId, role, servicePermissions } = ctx.internalAuth
-    if (role !== 'admin' && !servicePermissions?.[ctx.params.id]?.canToggleService) {
+    const { orgId, role, servicePermissions, scope } = ctx.internalAuth
+    const isStaff = scope === 'staff'
+    if (!isStaff && role !== 'admin' && !servicePermissions?.[ctx.params.id]?.canToggleService) {
       return ctx.response.status(403).send({ error: 'permission_required' })
     }
 
-    const service = await Service.query()
-      .where('id', Number(ctx.params.id))
-      .where('orgId', Number(orgId))
-      .first()
+    const serviceQuery = Service.query().where('id', Number(ctx.params.id))
+    if (!isStaff) serviceQuery.where('orgId', Number(orgId))
+    const service = await serviceQuery.first()
     if (!service) {
       return ctx.response.status(404).send({ error: 'service_not_found' })
     }

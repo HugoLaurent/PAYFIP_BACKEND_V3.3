@@ -60,6 +60,20 @@ export default class StaffController {
     })
   }
 
+  async createServiceClosure(ctx: HttpContext) {
+    await proxyRequest(ctx, {
+      targetUrl: `${auth()}/services/${ctx.params.id}/closures`,
+      jwt: { orgId: '', scope: 'staff', aud: 'svc-auth' },
+    })
+  }
+
+  async deleteServiceClosure(ctx: HttpContext) {
+    await proxyRequest(ctx, {
+      targetUrl: `${auth()}/services/${ctx.params.id}/closures/${ctx.params.closureId}`,
+      jwt: { orgId: '', scope: 'staff', aud: 'svc-auth' },
+    })
+  }
+
   async listUsers(ctx: HttpContext) {
     await proxyRequest(ctx, {
       targetUrl: `${auth()}/users`,
