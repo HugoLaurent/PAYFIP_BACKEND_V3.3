@@ -61,6 +61,27 @@ export default class StaffController {
     })
   }
 
+  async updateUser(ctx: HttpContext) {
+    await proxyRequest(ctx, {
+      targetUrl: `${auth()}/users/${ctx.params.id}`,
+      jwt: { orgId: '', scope: 'staff', aud: 'svc-auth' },
+    })
+  }
+
+  async resetUserPassword(ctx: HttpContext) {
+    await proxyRequest(ctx, {
+      targetUrl: `${auth()}/users/${ctx.params.id}/password`,
+      jwt: { orgId: '', scope: 'staff', aud: 'svc-auth' },
+    })
+  }
+
+  async deleteUser(ctx: HttpContext) {
+    await proxyRequest(ctx, {
+      targetUrl: `${auth()}/users/${ctx.params.id}`,
+      jwt: { orgId: '', scope: 'staff', aud: 'svc-auth' },
+    })
+  }
+
   async listOrders(ctx: HttpContext) {
     await proxyRequest(ctx, {
       targetUrl: `${billetterie()}/orders/staff`,

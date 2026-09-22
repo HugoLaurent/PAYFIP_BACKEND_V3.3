@@ -170,16 +170,18 @@ export default class UsersController {
   }
 
   async update(ctx: HttpContext) {
-    const { orgId, role } = ctx.internalAuth
-    if (role !== 'admin') {
+    const { orgId, role, scope } = ctx.internalAuth
+    const isStaff = scope === 'staff'
+    if (!isStaff && role !== 'admin') {
       return ctx.response.status(403).send({ error: 'admin_role_required' })
     }
 
-    const user = await User.query()
-      .where('id', Number(ctx.params.id))
-      .where('orgId', Number(orgId))
-      .whereNot('status', 'deleted')
-      .first()
+    // Le staff AREGIE intervient sur n'importe quel organisme (support
+    // client) — pas de filtre orgId dans ce cas, son JWT n'en porte pas.
+    // Un admin d'organisme reste, lui, borné au sien.
+    const userQuery = User.query().where('id', Number(ctx.params.id)).whereNot('status', 'deleted')
+    if (!isStaff) userQuery.where('orgId', Number(orgId))
+    const user = await userQuery.first()
 
     if (!user) {
       return ctx.response.status(404).send({ error: 'agent_not_found' })
@@ -189,9 +191,11 @@ export default class UsersController {
 
     // Un organisme ne doit jamais se retrouver sans aucun admin actif —
     // sans quoi plus personne ne peut se connecter pour en recréer un.
+    // user.orgId (pas la variable orgId du JWT, absente pour le staff) :
+    // toujours le bon organisme, que l'appelant soit staff ou admin.
     if (user.role === 'admin' && payload.status === 'inactive') {
       const otherActiveAdmins = await User.query()
-        .where('orgId', Number(orgId))
+        .where('orgId', user.orgId)
         .where('role', 'admin')
         .where('status', 'active')
         .whereNot('id', user.id)
@@ -251,16 +255,15 @@ export default class UsersController {
 
   /** PATCH /users/:id/password — un admin réinitialise le mot de passe d'un membre de son organisme. */
   async resetPassword(ctx: HttpContext) {
-    const { orgId, role } = ctx.internalAuth
-    if (role !== 'admin') {
+    const { orgId, role, scope } = ctx.internalAuth
+    const isStaff = scope === 'staff'
+    if (!isStaff && role !== 'admin') {
       return ctx.response.status(403).send({ error: 'admin_role_required' })
     }
 
-    const user = await User.query()
-      .where('id', Number(ctx.params.id))
-      .where('orgId', Number(orgId))
-      .whereNot('status', 'deleted')
-      .first()
+    const userQuery = User.query().where('id', Number(ctx.params.id)).whereNot('status', 'deleted')
+    if (!isStaff) userQuery.where('orgId', Number(orgId))
+    const user = await userQuery.first()
 
     if (!user) {
       return ctx.response.status(404).send({ error: 'agent_not_found' })
@@ -290,16 +293,15 @@ export default class UsersController {
    * valide" ailleurs, donc rien à casser en le laissant en base.
    */
   async destroy(ctx: HttpContext) {
-    const { orgId, role } = ctx.internalAuth
-    if (role !== 'admin') {
+    const { orgId, role, scope } = ctx.internalAuth
+    const isStaff = scope === 'staff'
+    if (!isStaff && role !== 'admin') {
       return ctx.response.status(403).send({ error: 'admin_role_required' })
     }
 
-    const user = await User.query()
-      .where('id', Number(ctx.params.id))
-      .where('orgId', Number(orgId))
-      .whereNot('status', 'deleted')
-      .first()
+    const userQuery = User.query().where('id', Number(ctx.params.id)).whereNot('status', 'deleted')
+    if (!isStaff) userQuery.where('orgId', Number(orgId))
+    const user = await userQuery.first()
 
     if (!user) {
       return ctx.response.status(404).send({ error: 'agent_not_found' })
