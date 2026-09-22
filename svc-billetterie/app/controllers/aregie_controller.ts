@@ -2,6 +2,7 @@ import type { HttpContext } from '@adonisjs/core/http'
 import BudgetCode from '#models/budget_code'
 import { depositBudgetCodesValidator } from '#validators/aregie'
 import { resolveByLinkCode } from '#services/svc_auth_client'
+import { runOnTenant } from '#services/tenant_connection_service'
 
 export default class AregieController {
   async deposit(ctx: HttpContext) {
@@ -28,26 +29,28 @@ export default class AregieController {
         continue
       }
 
-      const existing = await BudgetCode.query()
-        .where('serviceId', resolved.serviceId)
-        .where('code', line.code)
-        .first()
+      await runOnTenant(resolved.serviceId, async () => {
+        const existing = await BudgetCode.query()
+          .where('serviceId', resolved.serviceId)
+          .where('code', line.code)
+          .first()
 
-      if (!existing) {
-        await BudgetCode.create({
-          orgId: resolved.orgId,
-          serviceId: resolved.serviceId,
-          numcli: line.numcli,
-          code: line.code,
-          label: line.label,
-        })
-        created.push(`${line.numcli}/${line.code}`)
-        continue
-      }
+        if (!existing) {
+          await BudgetCode.create({
+            orgId: resolved.orgId,
+            serviceId: resolved.serviceId,
+            numcli: line.numcli,
+            code: line.code,
+            label: line.label,
+          })
+          created.push(`${line.numcli}/${line.code}`)
+          return
+        }
 
-      existing.label = line.label
-      await existing.save()
-      updated.push(`${line.numcli}/${line.code}`)
+        existing.label = line.label
+        await existing.save()
+        updated.push(`${line.numcli}/${line.code}`)
+      })
     }
 
     return ctx.response.status(201).send({ data: { created, updated, skipped } })

@@ -1,7 +1,13 @@
 import { DateTime } from 'luxon'
-import { BaseModel, column } from '@adonisjs/lucid/orm'
+import { column } from '@adonisjs/lucid/orm'
+import TenantBaseModel from '#models/tenant_base_model'
 
-export default class BudgetCode extends BaseModel {
+// Vivait jusqu'ici sur BaseModel (base centrale, voir tenant_base_model.ts)
+// : ne suffisait plus depuis que resolveByLinkCode donne un serviceId
+// fiable au moment du dépôt — bascule en tenant pour une isolation
+// physique, cohérente avec Tariff/Ticket/Order plutôt qu'un simple filtre
+// applicatif sur une table partagée entre tous les organismes.
+export default class BudgetCode extends TenantBaseModel {
   @column({ isPrimary: true })
   declare id: number
 

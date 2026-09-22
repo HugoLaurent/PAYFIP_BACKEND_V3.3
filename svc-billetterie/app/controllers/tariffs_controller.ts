@@ -51,15 +51,14 @@ export default class TariffsController {
       return ctx.response.status(403).send({ error: 'permission_required' })
     }
 
-    // BudgetCode reste app-local (pas de tenant) — pas de runOnTenant
-    // ici. Filtré par serviceId, pas numcli : un numcli peut être partagé
-    // entre plusieurs services d'un même organisme (voir link_code côté
-    // svc-auth), les codes budgétaires d'un autre service ne doivent
-    // jamais apparaître ici même s'ils partagent le même numcli.
-    const codes = await BudgetCode.query()
-      .where('orgId', Number(orgId))
-      .where('serviceId', serviceId)
-      .orderBy('code')
+    // BudgetCode vit désormais en tenant (voir tenant_base_model.ts) :
+    // isolation physique par service, plus besoin de filtrer par numcli
+    // (qui peut être partagé entre plusieurs services d'un même
+    // organisme, voir link_code côté svc-auth) — la base tenant elle-même
+    // garantit qu'on ne voit jamais les codes d'un autre service.
+    const codes = await runOnTenant(serviceId, () =>
+      BudgetCode.query().where('orgId', Number(orgId)).where('serviceId', serviceId).orderBy('code')
+    )
 
     return ctx.response.send({
       data: codes.map((c) => ({ code: c.code, label: c.label })),

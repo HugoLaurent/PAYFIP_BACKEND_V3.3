@@ -13,11 +13,10 @@ import { tenantConnectionStorage } from '#services/tenant_connection_service'
  * de requête/écriture lit la connexion tenant active (AsyncLocalStorage,
  * posée par tenant_connection_service.runOnTenant) et la passe
  * explicitement à Lucid — jamais de mutation de la connexion par défaut
- * globale. Scan, BudgetCode et OtpCode restent sur BaseModel (voir
- * §svc-billetterie du plan de migration DB-per-tenant : Scan a un
- * serviceId nullable, exercé en pratique pour les scans dont le code est
- * illisible/forgé, où il n'y a structurellement aucune base tenant à
- * choisir).
+ * globale. Scan et OtpCode restent sur BaseModel (voir §svc-billetterie du
+ * plan de migration DB-per-tenant : Scan a un serviceId nullable, exercé
+ * en pratique pour les scans dont le code est illisible/forgé, où il n'y a
+ * structurellement aucune base tenant à choisir).
  *
  * Les casts `as unknown as ...` sont nécessaires : TypeScript ne propage
  * pas `this: T` d'une méthode statique à travers un appel `super.xxx()`
