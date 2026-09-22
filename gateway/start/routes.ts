@@ -275,6 +275,13 @@ router
     router.patch('/staff/events/:id', [StaffController, 'updateEvent'])
     router.post('/staff/events/:id/cancel', [StaffController, 'cancelEvent'])
     router.delete('/staff/events/:id', [StaffController, 'deleteEvent'])
+    router.post('/staff/registrations/:id/review', [StaffController, 'reviewRegistration'])
+    router.post('/staff/registrations/:id/resend-reminder', [StaffController, 'resendRegistrationReminder'])
+    router.post('/staff/registrations/:id/cancel', [StaffController, 'cancelRegistration'])
+    router.get('/staff/registrations/:id/documents/:documentId', [
+      StaffController,
+      'downloadRegistrationDocument',
+    ])
     router.get('/staff/services/:id/aregie-mail-key', [StaffController, 'getServiceAregieMailKey'])
     router.put('/staff/services/:id/aregie-mail-key', [StaffController, 'updateServiceAregieMailKey'])
     router.delete('/staff/services/:id/aregie-mail-key', [StaffController, 'deleteServiceAregieMailKey'])

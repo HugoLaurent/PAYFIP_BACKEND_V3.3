@@ -174,6 +174,39 @@ export default class StaffController {
     })
   }
 
+  async reviewRegistration(ctx: HttpContext) {
+    await proxyRequest(ctx, {
+      targetUrl: `${inscription()}/registrations/${ctx.params.id}/review`,
+      jwt: { orgId: '', scope: 'staff', aud: 'svc-inscription' },
+      forwardQueryString: true,
+    })
+  }
+
+  async resendRegistrationReminder(ctx: HttpContext) {
+    await proxyRequest(ctx, {
+      targetUrl: `${inscription()}/registrations/${ctx.params.id}/resend-reminder`,
+      jwt: { orgId: '', scope: 'staff', aud: 'svc-inscription' },
+      forwardQueryString: true,
+    })
+  }
+
+  async cancelRegistration(ctx: HttpContext) {
+    await proxyRequest(ctx, {
+      targetUrl: `${inscription()}/registrations/${ctx.params.id}/cancel`,
+      jwt: { orgId: '', scope: 'staff', aud: 'svc-inscription' },
+      forwardQueryString: true,
+    })
+  }
+
+  async downloadRegistrationDocument(ctx: HttpContext) {
+    await proxyRequest(ctx, {
+      targetUrl: `${inscription()}/registrations/${ctx.params.id}/documents/${ctx.params.documentId}`,
+      jwt: { orgId: '', scope: 'staff', aud: 'svc-inscription' },
+      binary: true,
+      forwardQueryString: true,
+    })
+  }
+
   async listUsers(ctx: HttpContext) {
     await proxyRequest(ctx, {
       targetUrl: `${auth()}/users`,

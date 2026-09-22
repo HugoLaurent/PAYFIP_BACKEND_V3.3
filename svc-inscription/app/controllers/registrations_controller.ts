@@ -1229,24 +1229,25 @@ export default class RegistrationsController {
    * les justificatifs déposés (parcours C).
    */
   async review(ctx: HttpContext) {
-    const { orgId, role, servicePermissions, serviceIds } = ctx.internalAuth
+    const { orgId, role, servicePermissions, serviceIds, scope } = ctx.internalAuth
+    const isStaff = scope === 'staff'
     const { serviceId } = await serviceIdQueryValidator.validate(ctx.request.qs())
 
-    if (!serviceIds?.includes(serviceId)) {
+    if (!isStaff && !serviceIds?.includes(serviceId)) {
       return ctx.response.status(403).send({ error: 'service_not_allowed_for_agent' })
     }
 
     const payload = await ctx.request.validateUsing(reviewRegistrationValidator)
 
     return runOnTenant(serviceId, async () => {
-      const registration = await Registration.query()
+      const registrationQuery = Registration.query()
         .where('id', Number(ctx.params.id))
-        .where('orgId', orgId)
         .where('serviceId', serviceId)
-        .first()
+      if (!isStaff) registrationQuery.where('orgId', orgId)
+      const registration = await registrationQuery.first()
       if (!registration) return ctx.response.status(404).send({ error: 'registration_not_found' })
 
-      if (role !== 'admin' && !servicePermissions?.[String(registration.serviceId)]?.canScan) {
+      if (!isStaff && role !== 'admin' && !servicePermissions?.[String(registration.serviceId)]?.canScan) {
         return ctx.response.status(403).send({ error: 'permission_required' })
       }
 
@@ -1281,7 +1282,7 @@ export default class RegistrationsController {
       if (!event) return ctx.response.status(404).send({ error: 'event_not_found' })
 
       registration.reviewedBy = ctx.internalAuth.sub ? Number(ctx.internalAuth.sub) : null
-      registration.reviewedByLabel = agentLabel(ctx.internalAuth)
+      registration.reviewedByLabel = isStaff ? 'Staff AREGIE' : agentLabel(ctx.internalAuth)
       registration.reviewedAt = DateTime.now()
 
       if (payload.decision === 'reject' || payload.decision === 'request_more_documents') {
@@ -1319,22 +1320,23 @@ export default class RegistrationsController {
    * manuellement l'email déjà attendu par le citoyen quand ça traîne.
    */
   async resendReminder(ctx: HttpContext) {
-    const { orgId, role, servicePermissions, serviceIds } = ctx.internalAuth
+    const { orgId, role, servicePermissions, serviceIds, scope } = ctx.internalAuth
+    const isStaff = scope === 'staff'
     const { serviceId } = await serviceIdQueryValidator.validate(ctx.request.qs())
 
-    if (!serviceIds?.includes(serviceId)) {
+    if (!isStaff && !serviceIds?.includes(serviceId)) {
       return ctx.response.status(403).send({ error: 'service_not_allowed_for_agent' })
     }
 
     return runOnTenant(serviceId, async () => {
-      const registration = await Registration.query()
+      const registrationQuery = Registration.query()
         .where('id', Number(ctx.params.id))
-        .where('orgId', orgId)
         .where('serviceId', serviceId)
-        .first()
+      if (!isStaff) registrationQuery.where('orgId', orgId)
+      const registration = await registrationQuery.first()
       if (!registration) return ctx.response.status(404).send({ error: 'registration_not_found' })
 
-      if (role !== 'admin' && !servicePermissions?.[String(registration.serviceId)]?.canScan) {
+      if (!isStaff && role !== 'admin' && !servicePermissions?.[String(registration.serviceId)]?.canScan) {
         return ctx.response.status(403).send({ error: 'permission_required' })
       }
 
@@ -1378,22 +1380,23 @@ export default class RegistrationsController {
    * cancelByToken).
    */
   async cancel(ctx: HttpContext) {
-    const { orgId, role, servicePermissions, serviceIds } = ctx.internalAuth
+    const { orgId, role, servicePermissions, serviceIds, scope } = ctx.internalAuth
+    const isStaff = scope === 'staff'
     const { serviceId } = await serviceIdQueryValidator.validate(ctx.request.qs())
 
-    if (!serviceIds?.includes(serviceId)) {
+    if (!isStaff && !serviceIds?.includes(serviceId)) {
       return ctx.response.status(403).send({ error: 'service_not_allowed_for_agent' })
     }
 
     return runOnTenant(serviceId, async () => {
-      const registration = await Registration.query()
+      const registrationQuery = Registration.query()
         .where('id', Number(ctx.params.id))
-        .where('orgId', orgId)
         .where('serviceId', serviceId)
-        .first()
+      if (!isStaff) registrationQuery.where('orgId', orgId)
+      const registration = await registrationQuery.first()
       if (!registration) return ctx.response.status(404).send({ error: 'registration_not_found' })
 
-      if (role !== 'admin' && !servicePermissions?.[String(registration.serviceId)]?.canScan) {
+      if (!isStaff && role !== 'admin' && !servicePermissions?.[String(registration.serviceId)]?.canScan) {
         return ctx.response.status(403).send({ error: 'permission_required' })
       }
 
@@ -1417,23 +1420,24 @@ export default class RegistrationsController {
    * l'inscription.
    */
   async downloadDocument(ctx: HttpContext) {
-    const { orgId, role, servicePermissions, serviceIds } = ctx.internalAuth
+    const { orgId, role, servicePermissions, serviceIds, scope } = ctx.internalAuth
+    const isStaff = scope === 'staff'
     const { serviceId } = await serviceIdQueryValidator.validate(ctx.request.qs())
 
-    if (!serviceIds?.includes(serviceId)) {
+    if (!isStaff && !serviceIds?.includes(serviceId)) {
       return ctx.response.status(403).send({ error: 'service_not_allowed_for_agent' })
     }
 
     return runOnTenant(serviceId, async () => {
-      const registration = await Registration.query()
+      const registrationQuery = Registration.query()
         .where('id', Number(ctx.params.id))
-        .where('orgId', orgId)
         .where('serviceId', serviceId)
-        .first()
+      if (!isStaff) registrationQuery.where('orgId', orgId)
+      const registration = await registrationQuery.first()
       if (!registration) return ctx.response.status(404).send({ error: 'registration_not_found' })
 
       const permissions = servicePermissions?.[String(registration.serviceId)]
-      if (role !== 'admin' && !permissions?.canScan && !permissions?.canViewHistory) {
+      if (!isStaff && role !== 'admin' && !permissions?.canScan && !permissions?.canViewHistory) {
         return ctx.response.status(403).send({ error: 'permission_required' })
       }
 
