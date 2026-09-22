@@ -145,20 +145,20 @@ export default class EventsController {
    * TariffsController#index côté svc-billetterie.
    */
   async index(ctx: HttpContext) {
-    const { orgId, role, servicePermissions } = ctx.internalAuth
+    const { orgId, role, servicePermissions, scope } = ctx.internalAuth
+    const isStaff = scope === 'staff'
 
-    if (isAgentRequest(ctx.internalAuth)) {
+    if (isStaff || isAgentRequest(ctx.internalAuth)) {
       const { serviceId } = await ctx.request.validateUsing(listEventsAgentValidator)
 
-      if (role !== 'admin' && !servicePermissions?.[String(serviceId)]?.canManageTariffs) {
+      if (!isStaff && role !== 'admin' && !servicePermissions?.[String(serviceId)]?.canManageTariffs) {
         return ctx.response.status(403).send({ error: 'permission_required' })
       }
 
       return runOnTenant(serviceId, async () => {
-        const events = await Event.query()
-          .where('orgId', orgId)
-          .where('serviceId', serviceId)
-          .orderBy('createdAt', 'desc')
+        const eventsQuery = Event.query().where('serviceId', serviceId)
+        if (!isStaff) eventsQuery.where('orgId', orgId)
+        const events = await eventsQuery.orderBy('createdAt', 'desc')
 
         // Nombre d'inscriptions en attente de vérification par évènement —
         // seul indicateur (avec la cloche de notification) qu'une action est

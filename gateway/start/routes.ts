@@ -273,6 +273,7 @@ router
     router.get('/staff/budget-codes', [StaffController, 'listBudgetCodesForService'])
     router.post('/staff/tickets/:id/reset-scan', [StaffController, 'resetTicketScan'])
     router.post('/staff/tickets/:id/refund', [StaffController, 'refundTicket'])
+    router.get('/staff/events', [StaffController, 'listEvents'])
     router.post('/staff/services/:id/events', [StaffController, 'createEvent'])
     router.patch('/staff/events/:id', [StaffController, 'updateEvent'])
     router.post('/staff/events/:id/cancel', [StaffController, 'cancelEvent'])

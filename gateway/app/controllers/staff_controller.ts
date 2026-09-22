@@ -158,6 +158,14 @@ export default class StaffController {
     })
   }
 
+  async listEvents(ctx: HttpContext) {
+    await proxyRequest(ctx, {
+      targetUrl: `${inscription()}/events`,
+      jwt: { orgId: '', scope: 'staff', aud: 'svc-inscription' },
+      forwardQueryString: true,
+    })
+  }
+
   async createEvent(ctx: HttpContext) {
     await proxyRequest(ctx, {
       targetUrl: `${inscription()}/services/${ctx.params.id}/events`,
