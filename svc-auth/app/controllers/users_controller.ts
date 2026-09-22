@@ -98,12 +98,22 @@ export default class UsersController {
   }
 
   async store(ctx: HttpContext) {
-    const { orgId, role } = ctx.internalAuth
-    if (role !== 'admin') {
+    const { orgId, role, scope } = ctx.internalAuth
+    const isStaff = scope === 'staff'
+    if (!isStaff && role !== 'admin') {
       return ctx.response.status(403).send({ error: 'admin_role_required' })
     }
 
     const payload = await ctx.request.validateUsing(createAgentValidator)
+
+    // Un admin d'organisme ne peut créer que chez lui (payload.orgId
+    // ignoré, même s'il le forçait) — seul le staff choisit l'organisme
+    // cible, puisque son JWT n'en porte pas.
+    const targetOrgId = isStaff ? payload.orgId : Number(orgId)
+    if (isStaff && !targetOrgId) {
+      return ctx.response.status(422).send({ error: 'org_id_required' })
+    }
+
     const newRole = payload.role ?? 'agent'
 
     const existing = await User.findBy('email', payload.email)
@@ -120,7 +130,7 @@ export default class UsersController {
     const services =
       newRole === 'agent'
         ? await Service.query()
-            .where('orgId', Number(orgId))
+            .where('orgId', Number(targetOrgId))
             .whereIn('id', payload.serviceIds!)
         : []
 
@@ -131,7 +141,7 @@ export default class UsersController {
     const user = await db.transaction(async (trx) => {
       const newUser = await User.create(
         {
-          orgId: Number(orgId),
+          orgId: Number(targetOrgId),
           email: payload.email,
           passwordHash: await hash.make(payload.password),
           firstName: payload.firstName,

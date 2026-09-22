@@ -68,6 +68,13 @@ export default class StaffController {
     })
   }
 
+  async createUser(ctx: HttpContext) {
+    await proxyRequest(ctx, {
+      targetUrl: `${auth()}/users`,
+      jwt: { orgId: '', scope: 'staff', aud: 'svc-auth' },
+    })
+  }
+
   async updateUser(ctx: HttpContext) {
     await proxyRequest(ctx, {
       targetUrl: `${auth()}/users/${ctx.params.id}`,

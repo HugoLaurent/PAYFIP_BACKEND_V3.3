@@ -6,6 +6,10 @@ export const createAgentValidator = vine.compile(
     password: vine.string().minLength(6),
     firstName: vine.string().trim().minLength(1).maxLength(100),
     lastName: vine.string().trim().minLength(1).maxLength(100),
+    // Ignoré pour un admin d'organisme (son propre orgId du JWT fait
+    // toujours foi) — utilisé uniquement quand le staff crée un compte
+    // pour un organisme qu'il ne dirige pas, voir users_controller.ts#store.
+    orgId: vine.number().positive().optional(),
     // Un admin n'est rattaché à aucun service (accès complet d'office) —
     // serviceIds ne s'applique qu'au rôle par défaut 'agent', vérifié à
     // la main dans le contrôleur plutôt que rendu obligatoire ici.

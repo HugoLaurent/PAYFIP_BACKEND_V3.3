@@ -264,6 +264,7 @@ router
     router.put('/staff/services/:id/aregie-mail-key', [StaffController, 'updateServiceAregieMailKey'])
     router.delete('/staff/services/:id/aregie-mail-key', [StaffController, 'deleteServiceAregieMailKey'])
     router.get('/staff/users', [StaffController, 'listUsers'])
+    router.post('/staff/users', [StaffController, 'createUser'])
     router.patch('/staff/users/:id', [StaffController, 'updateUser'])
     router.patch('/staff/users/:id/password', [StaffController, 'resetUserPassword'])
     router.delete('/staff/users/:id', [StaffController, 'deleteUser'])
