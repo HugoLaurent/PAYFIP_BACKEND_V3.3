@@ -242,11 +242,11 @@ export default class ServicesController {
     // link_code, qui lui reste unique et sert à désambiguïser côté AREGIE.
     const linkCode = await uniqueLinkCode()
 
-    let slug =
-      payload.slug ??
-      (payload.serviceType === 'billetterie' || payload.serviceType === 'inscription'
-        ? slugify(payload.name)
-        : null)
+    // Les trois types ont une page publique par slug (lookup/:slug —
+    // factures y arrive via lien emailé + OTP plutôt qu'en le tapant,
+    // mais la route existe et le slug sert quand même à l'identité
+    // publique du service, voir ServicesController#lookupBySlug).
+    let slug = payload.slug ?? slugify(payload.name)
     if (slug) {
       const existingSlug = await Service.findBy('slug', slug)
       if (existingSlug) {
