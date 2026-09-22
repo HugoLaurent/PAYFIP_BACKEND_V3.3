@@ -269,6 +269,8 @@ router
     router.patch('/staff/tariffs/:id', [StaffController, 'updateTariff'])
     router.delete('/staff/tariffs/:id', [StaffController, 'deleteTariff'])
     router.get('/staff/budget-codes', [StaffController, 'listBudgetCodesForService'])
+    router.post('/staff/tickets/:id/reset-scan', [StaffController, 'resetTicketScan'])
+    router.post('/staff/tickets/:id/refund', [StaffController, 'refundTicket'])
     router.get('/staff/services/:id/aregie-mail-key', [StaffController, 'getServiceAregieMailKey'])
     router.put('/staff/services/:id/aregie-mail-key', [StaffController, 'updateServiceAregieMailKey'])
     router.delete('/staff/services/:id/aregie-mail-key', [StaffController, 'deleteServiceAregieMailKey'])

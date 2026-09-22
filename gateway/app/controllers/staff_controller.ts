@@ -127,6 +127,22 @@ export default class StaffController {
     })
   }
 
+  async resetTicketScan(ctx: HttpContext) {
+    await proxyRequest(ctx, {
+      targetUrl: `${billetterie()}/tickets/${ctx.params.id}/reset-scan`,
+      jwt: { orgId: '', scope: 'staff', aud: 'svc-billetterie' },
+      forwardQueryString: true,
+    })
+  }
+
+  async refundTicket(ctx: HttpContext) {
+    await proxyRequest(ctx, {
+      targetUrl: `${billetterie()}/tickets/${ctx.params.id}/refund`,
+      jwt: { orgId: '', scope: 'staff', aud: 'svc-billetterie' },
+      forwardQueryString: true,
+    })
+  }
+
   async listUsers(ctx: HttpContext) {
     await proxyRequest(ctx, {
       targetUrl: `${auth()}/users`,

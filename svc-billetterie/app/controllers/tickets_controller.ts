@@ -1,5 +1,6 @@
 import { DateTime } from 'luxon'
 import type { HttpContext } from '@adonisjs/core/http'
+import vine from '@vinejs/vine'
 import db from '@adonisjs/lucid/services/db'
 import Ticket from '#models/ticket'
 import Scan, { type ScanResult } from '#models/scan'
@@ -12,6 +13,15 @@ import {
   ensureTenantConnectionsForOrg,
   connectionNameFor,
 } from '#services/tenant_connection_service'
+
+// Staff : l'id de billet seul ne dit pas quel service (le JWT ne porte
+// ni orgId ni serviceIds), donc pas de fan-out possible via
+// findTicketInOrg() — le service visé vient explicitement de la requête.
+const staffServiceIdValidator = vine.compile(
+  vine.object({
+    serviceId: vine.number().positive(),
+  })
+)
 
 export default class TicketsController {
   /**
@@ -152,26 +162,34 @@ export default class TicketsController {
    * split, qui filtrait par orgId seul).
    */
   async resetScan(ctx: HttpContext) {
-    const { orgId, role, servicePermissions, serviceIds, sub } = ctx.internalAuth
+    const { orgId, role, servicePermissions, serviceIds, sub, scope } = ctx.internalAuth
+    const isStaff = scope === 'staff'
 
-    if (!sub) {
+    if (!isStaff && !sub) {
       return ctx.response.status(403).send({ error: 'agent_id_missing_in_token' })
     }
-    const agentId = Number(sub)
-    const label = agentLabel(ctx.internalAuth)
+    const agentId = isStaff ? 0 : Number(sub)
+    const label = isStaff ? 'Staff AREGIE' : agentLabel(ctx.internalAuth)
 
-    const ticket = await findTicketInOrg(Number(orgId), Number(ctx.params.id))
+    let ticket: Ticket | null
+    if (isStaff) {
+      const { serviceId } = await staffServiceIdValidator.validate(ctx.request.qs())
+      ticket = await runOnTenant(serviceId, () => Ticket.find(Number(ctx.params.id)))
+    } else {
+      ticket = await findTicketInOrg(Number(orgId), Number(ctx.params.id))
+    }
 
     if (!ticket) {
       return ctx.response.status(404).send({ error: 'ticket_not_found' })
     }
 
-    if (!serviceIds?.includes(ticket.serviceId)) {
-      return ctx.response.status(403).send({ error: 'service_not_allowed_for_agent' })
-    }
-
-    if (role !== 'admin' && !servicePermissions?.[String(ticket.serviceId)]?.canScan) {
-      return ctx.response.status(403).send({ error: 'permission_required' })
+    if (!isStaff) {
+      if (!serviceIds?.includes(ticket.serviceId)) {
+        return ctx.response.status(403).send({ error: 'service_not_allowed_for_agent' })
+      }
+      if (role !== 'admin' && !servicePermissions?.[String(ticket.serviceId)]?.canScan) {
+        return ctx.response.status(403).send({ error: 'permission_required' })
+      }
     }
 
     if (ticket.status !== 'consumed') {
@@ -208,27 +226,35 @@ export default class TicketsController {
    * un statut déjà terminal.
    */
   async refund(ctx: HttpContext) {
-    const { orgId, role, servicePermissions, serviceIds, sub } = ctx.internalAuth
+    const { orgId, role, servicePermissions, serviceIds, sub, scope } = ctx.internalAuth
+    const isStaff = scope === 'staff'
 
-    if (!sub) {
+    if (!isStaff && !sub) {
       return ctx.response.status(403).send({ error: 'agent_id_missing_in_token' })
     }
-    const agentId = Number(sub)
-    const label = agentLabel(ctx.internalAuth)
+    const agentId = isStaff ? 0 : Number(sub)
+    const label = isStaff ? 'Staff AREGIE' : agentLabel(ctx.internalAuth)
 
     const payload = await ctx.request.validateUsing(refundTicketValidator)
 
-    const ticket = await findTicketInOrg(Number(orgId), Number(ctx.params.id))
+    let ticket: Ticket | null
+    if (isStaff) {
+      const { serviceId } = await staffServiceIdValidator.validate(ctx.request.qs())
+      ticket = await runOnTenant(serviceId, () => Ticket.find(Number(ctx.params.id)))
+    } else {
+      ticket = await findTicketInOrg(Number(orgId), Number(ctx.params.id))
+    }
     if (!ticket) {
       return ctx.response.status(404).send({ error: 'ticket_not_found' })
     }
 
-    if (!serviceIds?.includes(ticket.serviceId)) {
-      return ctx.response.status(403).send({ error: 'service_not_allowed_for_agent' })
-    }
-
-    if (role !== 'admin' && !servicePermissions?.[String(ticket.serviceId)]?.canScan) {
-      return ctx.response.status(403).send({ error: 'permission_required' })
+    if (!isStaff) {
+      if (!serviceIds?.includes(ticket.serviceId)) {
+        return ctx.response.status(403).send({ error: 'service_not_allowed_for_agent' })
+      }
+      if (role !== 'admin' && !servicePermissions?.[String(ticket.serviceId)]?.canScan) {
+        return ctx.response.status(403).send({ error: 'permission_required' })
+      }
     }
 
     if (!['issued', 'consumed'].includes(ticket.status)) {
