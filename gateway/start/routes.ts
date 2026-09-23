@@ -72,24 +72,36 @@ router.post('/billetterie/otp/request', [BilletteriePublicsController, 'otpReque
 router.post('/billetterie/otp/verify', [BilletteriePublicsController, 'otpVerify'])
 router.get('/billetterie/tariffs', [BilletteriePublicsController, 'tariffs'])
 router.post('/billetterie/orders', [BilletteriePublicsController, 'createOrder'])
-router.get('/billetterie/orders/by-reference/:reference/tickets', [
-  BilletteriePublicsController,
-  'orderTicketsByReference',
-])
-router.get('/billetterie/orders/:id/tickets', [BilletteriePublicsController, 'orderTickets'])
-router.get('/billetterie/orders/by-reference/:reference/tickets/pdf', [
-  BilletteriePublicsController,
-  'ticketsPdfByReference',
-])
-router.get('/billetterie/orders/:id/tickets/pdf', [BilletteriePublicsController, 'ticketsPdf'])
-router.get('/billetterie/orders/by-reference/:reference/tickets/:ticketId/pdf', [
-  BilletteriePublicsController,
-  'ticketPdfByReference',
-])
-router.get('/billetterie/orders/:id/tickets/:ticketId/pdf', [
-  BilletteriePublicsController,
-  'ticketPdf',
-])
+router
+  .get('/billetterie/orders/by-reference/:reference/tickets', [
+    BilletteriePublicsController,
+    'orderTicketsByReference',
+  ])
+  .use(middleware.publicProofRateLimit())
+router
+  .get('/billetterie/orders/:id/tickets', [BilletteriePublicsController, 'orderTickets'])
+  .use(middleware.publicProofRateLimit())
+router
+  .get('/billetterie/orders/by-reference/:reference/tickets/pdf', [
+    BilletteriePublicsController,
+    'ticketsPdfByReference',
+  ])
+  .use(middleware.publicProofRateLimit())
+router
+  .get('/billetterie/orders/:id/tickets/pdf', [BilletteriePublicsController, 'ticketsPdf'])
+  .use(middleware.publicProofRateLimit())
+router
+  .get('/billetterie/orders/by-reference/:reference/tickets/:ticketId/pdf', [
+    BilletteriePublicsController,
+    'ticketPdfByReference',
+  ])
+  .use(middleware.publicProofRateLimit())
+router
+  .get('/billetterie/orders/:id/tickets/:ticketId/pdf', [
+    BilletteriePublicsController,
+    'ticketPdf',
+  ])
+  .use(middleware.publicProofRateLimit())
 router
   .post('/billetterie/orders/by-reference/:reference/retry-payment', [
     BilletteriePublicsController,

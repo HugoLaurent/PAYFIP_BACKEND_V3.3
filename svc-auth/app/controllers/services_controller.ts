@@ -782,6 +782,14 @@ export default class ServicesController {
 
     ctx.response.header('Content-Type', service.logoMimeType)
     ctx.response.header('Cache-Control', 'public, max-age=300')
+    // Un logo SVG n'est pas sanitizé au dépôt (gardé vectoriel tel quel,
+    // voir image_processing_service.ts) : si quelqu'un navigue directement
+    // sur cette URL au lieu de l'afficher via <img>, le navigateur exécute
+    // le JS qu'il contient. CSP restrictive scopée à cette seule réponse :
+    // aucun impact sur l'affichage en <img>, désamorce l'exécution de
+    // script quel que soit le mode de chargement.
+    ctx.response.header('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'; sandbox")
+    ctx.response.header('X-Content-Type-Options', 'nosniff')
     return ctx.response.send(service.logoData)
   }
 
@@ -851,6 +859,10 @@ export default class ServicesController {
 
     ctx.response.header('Content-Type', service.coverImageMimeType)
     ctx.response.header('Cache-Control', 'public, max-age=300')
+    // Voir showLogo : même risque XSS stocké sur SVG non sanitizé, même
+    // mitigation.
+    ctx.response.header('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'; sandbox")
+    ctx.response.header('X-Content-Type-Options', 'nosniff')
     return ctx.response.send(service.coverImageData)
   }
 

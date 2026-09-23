@@ -1,12 +1,6 @@
-import { SignJWT, importJWK } from 'jose'
 import env from '#start/env'
+import { mintBilletterieJwt } from '#services/internal_jwt_service'
 import { fetchWithTimeout } from '#services/fetch_with_timeout'
-
-function decodeJwk(base64: string) {
-  return JSON.parse(Buffer.from(base64, 'base64').toString('utf-8'))
-}
-
-const privateKeyPromise = importJWK(decodeJwk(env.get('BILLETTERIE_JWT_PRIVATE_KEY')), 'EdDSA')
 
 export interface CreatePaymentRequestParams {
   orgId: string
@@ -43,13 +37,11 @@ export interface PaymentRequestResult {
 export async function createPaymentRequest(
   params: CreatePaymentRequestParams
 ): Promise<PaymentRequestResult> {
-  const privateKey = await privateKeyPromise
-  const token = await new SignJWT({ orgId: params.orgId, scope: 'billetterie' })
-    .setProtectedHeader({ alg: 'EdDSA', kid: 'svc-billetterie' })
-    .setIssuedAt()
-    .setExpirationTime('2m')
-    .setAudience('svc-gestion')
-    .sign(privateKey)
+  const token = await mintBilletterieJwt({
+    orgId: params.orgId,
+    scope: 'billetterie',
+    aud: 'svc-gestion',
+  })
 
   const response = await fetchWithTimeout(`${env.get('SVC_GESTION_BASE_URL')}/payment-requests`, {
     method: 'POST',
@@ -92,13 +84,11 @@ export async function retryPaymentRequest(
   originalPaymentRequestId: number,
   params: CreatePaymentRequestParams
 ): Promise<PaymentRequestResult> {
-  const privateKey = await privateKeyPromise
-  const token = await new SignJWT({ orgId: params.orgId, scope: 'billetterie' })
-    .setProtectedHeader({ alg: 'EdDSA', kid: 'svc-billetterie' })
-    .setIssuedAt()
-    .setExpirationTime('2m')
-    .setAudience('svc-gestion')
-    .sign(privateKey)
+  const token = await mintBilletterieJwt({
+    orgId: params.orgId,
+    scope: 'billetterie',
+    aud: 'svc-gestion',
+  })
 
   const response = await fetchWithTimeout(
     `${env.get('SVC_GESTION_BASE_URL')}/payment-requests/${originalPaymentRequestId}/retry`,
@@ -147,13 +137,7 @@ export async function listPaymentAttempts(
   orgId: string,
   sourceReference: string
 ): Promise<PaymentAttempt[]> {
-  const privateKey = await privateKeyPromise
-  const token = await new SignJWT({ orgId, scope: 'billetterie' })
-    .setProtectedHeader({ alg: 'EdDSA', kid: 'svc-billetterie' })
-    .setIssuedAt()
-    .setExpirationTime('2m')
-    .setAudience('svc-gestion')
-    .sign(privateKey)
+  const token = await mintBilletterieJwt({ orgId, scope: 'billetterie', aud: 'svc-gestion' })
 
   const response = await fetchWithTimeout(
     `${env.get('SVC_GESTION_BASE_URL')}/payment-requests/by-reference/${encodeURIComponent(sourceReference)}`,

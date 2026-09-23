@@ -1,12 +1,6 @@
-import { SignJWT, importJWK } from 'jose'
 import env from '#start/env'
+import { mintBilletterieJwt } from '#services/internal_jwt_service'
 import { fetchWithTimeout } from '#services/fetch_with_timeout'
-
-function decodeJwk(base64: string) {
-  return JSON.parse(Buffer.from(base64, 'base64').toString('utf-8'))
-}
-
-const privateKeyPromise = importJWK(decodeJwk(env.get('BILLETTERIE_JWT_PRIVATE_KEY')), 'EdDSA')
 
 export interface MailAttachment {
   filename: string
@@ -25,13 +19,7 @@ export interface SendMailParams {
 }
 
 export async function sendMail(params: SendMailParams): Promise<{ sent: boolean }> {
-  const privateKey = await privateKeyPromise
-  const token = await new SignJWT({ orgId: '0', scope: 'billetterie' })
-    .setProtectedHeader({ alg: 'EdDSA', kid: 'svc-billetterie' })
-    .setIssuedAt()
-    .setExpirationTime('2m')
-    .setAudience('svc-mail')
-    .sign(privateKey)
+  const token = await mintBilletterieJwt({ orgId: '0', scope: 'billetterie', aud: 'svc-mail' })
 
   const response = await fetchWithTimeout(`${env.get('SVC_MAIL_BASE_URL')}/emails`, {
     method: 'POST',

@@ -1,13 +1,7 @@
-import { SignJWT, importJWK } from 'jose'
 import type { DateTime } from 'luxon'
 import env from '#start/env'
+import { mintBilletterieJwt } from '#services/internal_jwt_service'
 import { fetchWithTimeout } from '#services/fetch_with_timeout'
-
-function decodeJwk(base64: string) {
-  return JSON.parse(Buffer.from(base64, 'base64').toString('utf-8'))
-}
-
-const privateKeyPromise = importJWK(decodeJwk(env.get('BILLETTERIE_JWT_PRIVATE_KEY')), 'EdDSA')
 
 export interface ResolvedService {
   orgId: number
@@ -23,13 +17,7 @@ export interface ResolvedService {
  * découvrir.
  */
 export async function resolveByNumcli(numcli: string): Promise<ResolvedService | null> {
-  const privateKey = await privateKeyPromise
-  const token = await new SignJWT({ orgId: '0', scope: 'billetterie' })
-    .setProtectedHeader({ alg: 'EdDSA', kid: 'svc-billetterie' })
-    .setIssuedAt()
-    .setExpirationTime('2m')
-    .setAudience('svc-auth')
-    .sign(privateKey)
+  const token = await mintBilletterieJwt({ orgId: '0', scope: 'billetterie', aud: 'svc-auth' })
 
   const response = await fetchWithTimeout(
     `${env.get('SVC_AUTH_BASE_URL')}/services/by-numcli/${encodeURIComponent(numcli)}`,
@@ -54,13 +42,7 @@ export interface ResolvedServiceByLinkCode extends ResolvedService {
  * code budgétaire est destiné.
  */
 export async function resolveByLinkCode(linkCode: string): Promise<ResolvedServiceByLinkCode | null> {
-  const privateKey = await privateKeyPromise
-  const token = await new SignJWT({ orgId: '0', scope: 'billetterie' })
-    .setProtectedHeader({ alg: 'EdDSA', kid: 'svc-billetterie' })
-    .setIssuedAt()
-    .setExpirationTime('2m')
-    .setAudience('svc-auth')
-    .sign(privateKey)
+  const token = await mintBilletterieJwt({ orgId: '0', scope: 'billetterie', aud: 'svc-auth' })
 
   const response = await fetchWithTimeout(
     `${env.get('SVC_AUTH_BASE_URL')}/services/by-link-code/${encodeURIComponent(linkCode)}`,
@@ -122,13 +104,11 @@ export async function fetchServiceStatus(
   orgId: number,
   serviceId: number
 ): Promise<ServiceAvailability | null> {
-  const privateKey = await privateKeyPromise
-  const token = await new SignJWT({ orgId: String(orgId), scope: 'billetterie' })
-    .setProtectedHeader({ alg: 'EdDSA', kid: 'svc-billetterie' })
-    .setIssuedAt()
-    .setExpirationTime('2m')
-    .setAudience('svc-auth')
-    .sign(privateKey)
+  const token = await mintBilletterieJwt({
+    orgId: String(orgId),
+    scope: 'billetterie',
+    aud: 'svc-auth',
+  })
 
   const url = new URL(`${env.get('SVC_AUTH_BASE_URL')}/services/${serviceId}/status`)
   url.searchParams.set('orgId', String(orgId))

@@ -1,5 +1,5 @@
-import { SignJWT, importJWK } from 'jose'
 import env from '#start/env'
+import { mintBilletterieJwt } from '#services/internal_jwt_service'
 import { fetchWithTimeout } from '#services/fetch_with_timeout'
 
 export interface TenantDbConfig {
@@ -15,20 +15,8 @@ export interface TenantDbConfig {
 
 const APP_NAME = 'billetterie'
 
-function decodeJwk(base64: string) {
-  return JSON.parse(Buffer.from(base64, 'base64').toString('utf-8'))
-}
-
-const privateKeyPromise = importJWK(decodeJwk(env.get('BILLETTERIE_JWT_PRIVATE_KEY')), 'EdDSA')
-
-async function mintRegistryJwt(): Promise<string> {
-  const privateKey = await privateKeyPromise
-  return new SignJWT({ orgId: '0', scope: 'billetterie' })
-    .setProtectedHeader({ alg: 'EdDSA', kid: 'svc-billetterie' })
-    .setIssuedAt()
-    .setExpirationTime('2m')
-    .setAudience('svc-auth')
-    .sign(privateKey)
+function mintRegistryJwt(): Promise<string> {
+  return mintBilletterieJwt({ orgId: '0', scope: 'billetterie', aud: 'svc-auth' })
 }
 
 let cache = new Map<number, TenantDbConfig>()
