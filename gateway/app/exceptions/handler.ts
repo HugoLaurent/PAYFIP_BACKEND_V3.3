@@ -22,7 +22,18 @@ export default class HttpExceptionHandler extends ExceptionHandler {
     // 5xx uniquement : les 4xx (validation, auth, JSON malformé...) sont un
     // fonctionnement normal de l'appli, pas des bugs — les envoyer noierait
     // GlitchTip sous du bruit et rendrait les vraies erreurs invisibles.
-    const status = ctx.response.response.statusCode
+    //
+    // ctx.response.response.statusCode ne convient PAS ici : le serveur
+    // AdonisJS appelle report() puis attend sa résolution AVANT d'appeler
+    // handle() (celui qui pose effectivement le status sur la réponse) —
+    // voir #requestErrorResponder dans @adonisjs/http-server. À ce
+    // moment-là, response.statusCode vaut encore sa valeur par défaut
+    // (200), donc `status >= 500` était toujours faux et GlitchTip ne
+    // recevait jamais aucune erreur, quelle que soit sa gravité.
+    // error.status est ce que le framework utilise lui-même en interne
+    // (toHttpError()) pour décider du status final — disponible dès
+    // maintenant, contrairement à response.statusCode.
+    const status = (error as { status?: number } | null)?.status ?? 500
     if (status >= 500) {
       Sentry.captureException(error)
     }
