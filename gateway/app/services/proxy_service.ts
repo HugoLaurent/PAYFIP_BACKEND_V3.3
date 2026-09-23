@@ -4,6 +4,22 @@ import type { MultipartFile } from '@adonisjs/bodyparser/types'
 import { mintInternalJwt, type InternalJwtClaims } from '#services/internal_jwt_service'
 import { fetchWithTimeout } from '#services/fetch_with_timeout'
 
+/**
+ * fetchWithTimeout ne catch rien lui-même : sans ce wrapper, un service
+ * cible down/injoignable remontait tel quel jusqu'au handler d'erreur
+ * global, qui répondait 500 — indistinguable côté front d'un vrai bug
+ * gateway. AbortSignal.timeout() rejette avec un DOMException nommé
+ * 'TimeoutError' (à ne pas confondre avec 'AbortError', réservé à une
+ * annulation manuelle qu'on ne fait jamais ici) ; toute autre erreur de
+ * fetch (ECONNREFUSED, DNS...) est un TypeError générique.
+ */
+function proxyErrorResponse(error: unknown): { status: number; body: { error: string } } {
+  if (error instanceof Error && error.name === 'TimeoutError') {
+    return { status: 504, body: { error: 'upstream_timeout' } }
+  }
+  return { status: 502, body: { error: 'upstream_unavailable' } }
+}
+
 export interface ProxyOptions {
   targetUrl: string
   method?: string
@@ -39,12 +55,19 @@ export async function proxyRequest(ctx: HttpContext, options: ProxyOptions): Pro
 
   const hasBody = !['GET', 'HEAD'].includes(method.toUpperCase())
 
-  const response = await fetchWithTimeout(url, {
-    method,
-    headers,
-    body: hasBody ? JSON.stringify(ctx.request.body()) : undefined,
-    redirect: 'manual',
-  })
+  let response: Response
+  try {
+    response = await fetchWithTimeout(url, {
+      method,
+      headers,
+      body: hasBody ? JSON.stringify(ctx.request.body()) : undefined,
+      redirect: 'manual',
+    })
+  } catch (error) {
+    const { status, body } = proxyErrorResponse(error)
+    ctx.response.status(status).send(body)
+    return
+  }
 
   if (response.status >= 300 && response.status < 400) {
     const location = response.headers.get('location')
@@ -116,12 +139,19 @@ export async function proxyUpload(ctx: HttpContext, options: ProxyUploadOptions)
 
   // Pas de Content-Type manuel : FormData génère lui-même le boundary
   // multipart, le fixer à la main casserait l'encodage.
-  const response = await fetchWithTimeout(options.targetUrl, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${await mintInternalJwt(options.jwt)}` },
-    body: formData,
-    redirect: 'manual',
-  })
+  let response: Response
+  try {
+    response = await fetchWithTimeout(options.targetUrl, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${await mintInternalJwt(options.jwt)}` },
+      body: formData,
+      redirect: 'manual',
+    })
+  } catch (error) {
+    const { status, body } = proxyErrorResponse(error)
+    ctx.response.status(status).send(body)
+    return
+  }
 
   let body: unknown = null
   try {
@@ -194,12 +224,19 @@ export async function proxyMultipartUpload(
 
   // Pas de Content-Type manuel : FormData génère lui-même le boundary
   // multipart, le fixer à la main casserait l'encodage.
-  const uploadResponse = await fetchWithTimeout(options.targetUrl, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${await mintInternalJwt(options.jwt)}` },
-    body: uploadFormData,
-    redirect: 'manual',
-  })
+  let uploadResponse: Response
+  try {
+    uploadResponse = await fetchWithTimeout(options.targetUrl, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${await mintInternalJwt(options.jwt)}` },
+      body: uploadFormData,
+      redirect: 'manual',
+    })
+  } catch (error) {
+    const { status, body } = proxyErrorResponse(error)
+    ctx.response.status(status).send(body)
+    return
+  }
 
   let uploadBody: unknown = null
   try {
