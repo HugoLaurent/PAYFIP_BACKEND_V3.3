@@ -67,6 +67,9 @@ jobs:
     needs: [changes, audit]
     if: needs.changes.outputs.services != ''
     runs-on: ubuntu-latest
+    concurrency:
+      group: deploy-production
+      cancel-in-progress: false
     steps:
       - name: Deploy to VPS
         uses: appleboy/ssh-action@v1
