@@ -27,8 +27,21 @@ import { resolvePayment } from '#services/payment_resolution_service'
 // (ex: 502), pas une limite réellement appliquée par PayFiP. On reste
 // néanmoins raisonnable : un cooldown court évite de re-taper un paiement
 // tout juste vérifié à chaque tour du scheduler.
+//
+// Les 15 min citées dans le guide ne concernent que la mise en relation
+// initiale (ouverture de la page de paiement) — le lookup de résultat,
+// lui, reste valide jusqu'à 1 an pour un idOp qui a vraiment atteint le
+// prestataire de télépaiement (guide §3.5.2.6). En revanche, un idOp
+// abandonné AVANT d'y arriver est supprimé côté PayFiP dès la nuit
+// suivante : recupererDetailPaiementSecurise répond alors une
+// FonctionnelleErreur "P1 : IdOp incorrect" (à distinguer de "P5 :
+// résultat pas encore connu", légitime — voir envelope.ts et
+// real_client.spec.ts). Un idOp qui répond P1 ne redeviendra jamais
+// valide : on arrête de le retenter plutôt que de marteler PayFiP
+// jusqu'à MAX_AGE_HOURS pour rien.
 const MAX_AGE_HOURS = 24 * 7
 const RECHECK_COOLDOWN_MINUTES = 5
+const DEAD_IDOP_RESULT_CODE = 'P1'
 
 export async function reconcileStalePaymentRequests(): Promise<number> {
   const cutoff = DateTime.now().minus({ hours: MAX_AGE_HOURS })
@@ -48,6 +61,7 @@ export async function reconcileStalePaymentRequests(): Promise<number> {
       .orderBy('calledAt', 'desc')
       .first()
 
+    if (lastAttempt?.payfipResultCode === DEAD_IDOP_RESULT_CODE) continue
     if (lastAttempt && lastAttempt.calledAt > cooldownCutoff) continue
 
     try {
