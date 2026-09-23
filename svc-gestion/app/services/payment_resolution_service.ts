@@ -66,3 +66,39 @@ export async function resolvePayment(
   await paymentRequest.refresh()
   return paymentRequest
 }
+
+/**
+ * Bascule un payment_request encore awaiting_payment vers expired — pour
+ * un idOp que PayFiP a confirmé mort (FonctionnelleErreur P1) ou dont la
+ * fenêtre de mise en relation (expiresAt, 15 min) est dépassée sans
+ * résolution. Appelée uniquement par payment_reconciliation_service.ts,
+ * jamais depuis resolvePayment() : celle-ci ne fait que refléter ce que
+ * PayFiP répond, l'expiration est une décision temporelle qui lui est
+ * extérieure.
+ *
+ * Même mécanique transactionnelle que resolvePayment() (update
+ * conditionnel + webhook) pour que /retry et l'idempotence de store()
+ * (qui excluent finalFailureStatuses = failed/cancelled/expired) se
+ * débloquent enfin — sans ça, un citoyen qui abandonne avant de payer
+ * reste bloqué indéfiniment : /retry répond 409 ("pas dans un état
+ * retentable"), et un nouvel appel à store() renvoie par idempotence
+ * l'ancien idOp, mort depuis longtemps.
+ */
+export async function expireStalePaymentRequest(
+  paymentRequest: PaymentRequest
+): Promise<PaymentRequest> {
+  const rows = await db
+    .from('payment_requests')
+    .where('id', paymentRequest.id)
+    .whereNotIn('status', PaymentRequest.finalStatuses)
+    .update({ status: 'expired', updated_at: DateTime.now().toSQL() }, ['*'])
+
+  if (rows.length > 0) {
+    await paymentRequest.refresh()
+    await dispatchWebhook(paymentRequest, 'paiement.echec')
+    return paymentRequest
+  }
+
+  await paymentRequest.refresh()
+  return paymentRequest
+}

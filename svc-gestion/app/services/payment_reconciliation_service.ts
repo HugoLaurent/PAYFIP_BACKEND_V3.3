@@ -2,7 +2,7 @@ import { DateTime } from 'luxon'
 import logger from '@adonisjs/core/services/logger'
 import PaymentRequest from '#models/payment_request'
 import PaymentResolutionAttempt from '#models/payment_resolution_attempt'
-import { resolvePayment } from '#services/payment_resolution_service'
+import { expireStalePaymentRequest, resolvePayment } from '#services/payment_resolution_service'
 
 // Filet de sécurité pour le cas où ni urlnotif (jamais observé en
 // environnement de test PayFiP à ce jour — 0 occurrence sur l'historique
@@ -37,8 +37,17 @@ import { resolvePayment } from '#services/payment_resolution_service'
 // FonctionnelleErreur "P1 : IdOp incorrect" (à distinguer de "P5 :
 // résultat pas encore connu", légitime — voir envelope.ts et
 // real_client.spec.ts). Un idOp qui répond P1 ne redeviendra jamais
-// valide : on arrête de le retenter plutôt que de marteler PayFiP
-// jusqu'à MAX_AGE_HOURS pour rien.
+// valide.
+//
+// Ni resolvePayment() ni ce job ne faisaient jamais expirer un
+// payment_request auparavant — un citoyen qui abandonne avant de payer
+// restait "awaiting_payment" pour toujours, et /retry comme
+// l'idempotence de store() (qui excluent tous deux finalFailureStatuses
+// = failed/cancelled/expired) refusaient indéfiniment de repartir sur
+// une base saine. Deux cas déclenchent maintenant expireStalePaymentRequest :
+// un P1 confirmé (mort à coup sûr, quel que soit expiresAt), ou
+// expiresAt dépassé après une vérification réelle auprès de PayFiP qui
+// ne l'a pas résolu (P5 éternel, ou idOp jamais utilisé).
 const MAX_AGE_HOURS = 24 * 7
 const RECHECK_COOLDOWN_MINUTES = 5
 const DEAD_IDOP_RESULT_CODE = 'P1'
@@ -46,6 +55,7 @@ const DEAD_IDOP_RESULT_CODE = 'P1'
 export async function reconcileStalePaymentRequests(): Promise<number> {
   const cutoff = DateTime.now().minus({ hours: MAX_AGE_HOURS })
   const cooldownCutoff = DateTime.now().minus({ minutes: RECHECK_COOLDOWN_MINUTES })
+  const now = DateTime.now()
 
   const candidates = await PaymentRequest.query()
     .where('status', 'awaiting_payment')
@@ -61,12 +71,29 @@ export async function reconcileStalePaymentRequests(): Promise<number> {
       .orderBy('calledAt', 'desc')
       .first()
 
-    if (lastAttempt?.payfipResultCode === DEAD_IDOP_RESULT_CODE) continue
+    if (lastAttempt?.payfipResultCode === DEAD_IDOP_RESULT_CODE) {
+      await expireStalePaymentRequest(paymentRequest)
+      reconciledCount++
+      continue
+    }
     if (lastAttempt && lastAttempt.calledAt > cooldownCutoff) continue
 
     try {
       const resolved = await resolvePayment(paymentRequest.payfipIdOp, 'reconciliation')
-      if (resolved && resolved.status !== 'awaiting_payment') reconciledCount++
+
+      if (resolved && resolved.status !== 'awaiting_payment') {
+        reconciledCount++
+        continue
+      }
+
+      // Toujours awaiting_payment après une vérification réelle auprès
+      // de PayFiP (pas juste une supposition locale) : si la fenêtre de
+      // mise en relation est dépassée, cet idOp ne pourra plus jamais
+      // aboutir.
+      if (paymentRequest.expiresAt && paymentRequest.expiresAt < now) {
+        await expireStalePaymentRequest(paymentRequest)
+        reconciledCount++
+      }
     } catch (error) {
       // Une erreur sur un idOp ne doit jamais interrompre le balayage des
       // autres paiements encore en attente.
