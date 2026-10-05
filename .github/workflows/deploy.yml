@@ -88,6 +88,11 @@ jobs:
           host: ${{ secrets.VPS_HOST }}
           username: hlaurent
           key: ${{ secrets.VPS_SSH_KEY }}
+          # Défaut de l'action : 10 min. Un build complet (7 services qui font `npm ci` en
+          # parallèle sur le VPS, ~5 min chacun) le dépasse : la connexion était coupée en
+          # plein `build`, avant le `up -d` (déploiement du 05/10/2026). Les builds suivants
+          # profitent du cache Docker et restent bien plus courts.
+          command_timeout: 30m
           script: |
             set -e
             cd /opt/payfip/backend-src
