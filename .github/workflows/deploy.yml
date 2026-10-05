@@ -61,9 +61,18 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24
+      # Même seuil qu'avant (high), mais avec UNE exception documentée :
+      #   GHSA-vfj7-8cjw-p6xm (braces, DoS par récursion sur motifs imbriqués).
+      #   - Aucune version corrigée n'existe : la dernière publiée (3.0.3) est elle-même
+      #     visée, donc ni `npm audit fix` ni un override ne peuvent la corriger.
+      #   - Arrive par @adonisjs/core -> assembler -> fast-glob -> micromatch -> braces :
+      #     utilisé pour lister des fichiers avec des motifs fixes, jamais avec des
+      #     données fournies par un utilisateur.
+      # À RETIRER dès qu'une version corrigée de braces est publiée (npm view braces version).
+      # Toute autre alerte high/critical bloque toujours le déploiement.
       - name: npm audit (${{ matrix.service }})
         working-directory: ${{ matrix.service }}
-        run: npm audit --audit-level=high
+        run: npx --yes audit-ci@7.1.0 --high --allowlist GHSA-vfj7-8cjw-p6xm
 
   deploy:
     needs: [changes, audit]
