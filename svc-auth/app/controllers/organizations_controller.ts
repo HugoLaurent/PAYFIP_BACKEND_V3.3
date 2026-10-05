@@ -32,6 +32,24 @@ export default class OrganizationsController {
   }
 
   /**
+   * GET /organizations/:id — staff only. Un seul organisme (fiche staff).
+   * Même règle que index() : un organisme supprimé logiquement (status
+   * 'deleted') n'existe plus pour le staff → 404, y compris par son id.
+   */
+  async show(ctx: HttpContext) {
+    if (ctx.internalAuth.scope !== 'staff') {
+      return ctx.response.status(403).send({ error: 'scope_not_allowed' })
+    }
+
+    const organization = await Organization.find(Number(ctx.params.id))
+    if (!organization || organization.status === 'deleted') {
+      return ctx.response.status(404).send({ error: 'organization_not_found' })
+    }
+
+    return ctx.response.send({ data: serializeOrganization(organization) })
+  }
+
+  /**
    * PATCH /organizations/:id — staff only. Renommer et/ou
    * suspendre/réactiver un organisme (jamais de suppression ici, voir
    * ORGANIZATION_STATUSES — 'deleted' n'est pas atteignable par cette

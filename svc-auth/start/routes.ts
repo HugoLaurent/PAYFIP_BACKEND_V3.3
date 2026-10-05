@@ -42,6 +42,7 @@ router
     router.patch('/tenant-databases/:id/status', [TenantDatabasesController, 'updateStatus'])
 
     router.get('/organizations', [OrganizationsController, 'index'])
+    router.get('/organizations/:id', [OrganizationsController, 'show'])
     router.post('/organizations', [OrganizationsController, 'store'])
     router.patch('/organizations/:id', [OrganizationsController, 'update'])
     router.delete('/organizations/:id', [OrganizationsController, 'destroy'])
