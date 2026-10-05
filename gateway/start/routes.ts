@@ -266,6 +266,7 @@ router
 router
   .group(() => {
     router.get('/staff/organizations', [StaffController, 'listOrganizations'])
+    router.get('/staff/organizations/:id', [StaffController, 'getOrganization'])
     router.post('/staff/organizations', [StaffController, 'createOrganization'])
     router.patch('/staff/organizations/:id', [StaffController, 'updateOrganization'])
     router.delete('/staff/organizations/:id', [StaffController, 'deleteOrganization'])
