@@ -35,6 +35,7 @@ import {
   sendPaymentRequestEmail,
   sendRegistrationRejectionEmail,
   sendDocumentsToAgentEmail,
+  loadDocumentsDestination,
   DocumentsRelayError,
 } from '#services/registration_mail_service'
 import type { DocumentToRelay } from '#services/registration_mail_service'
@@ -478,6 +479,13 @@ export default class RegistrationsController {
       const requirements = event.documentRequirements ?? []
       if (requirements.length === 0) {
         return ctx.response.status(422).send({ error: 'documents_not_required' })
+      }
+
+      // Le service doit avoir réglé la boîte qui reçoit les pièces (Services >
+      // Paramètres) : sinon on refuse AVANT de lire les fichiers, avec une
+      // erreur claire plutôt qu'un échec d'envoi après coup.
+      if (!(await loadDocumentsDestination()).email) {
+        return ctx.response.status(503).send({ error: 'documents_destination_not_configured' })
       }
 
       const result = await this.readNamedDocuments(ctx, requirements, { requireAll: true })

@@ -239,6 +239,8 @@ router
       InscriptionAgentsController,
       'reviewRegistration',
     ])
+    router.get('/inscription/services/:id/settings', [InscriptionAgentsController, 'showServiceSettings'])
+    router.put('/inscription/services/:id/settings', [InscriptionAgentsController, 'updateServiceSettings'])
     router.post('/inscription/registrations/:id/resend-reminder', [
       InscriptionAgentsController,
       'resendReminder',

@@ -6,6 +6,7 @@ import type Event from '#models/event'
 import { sendMail } from '#services/svc_mail_client'
 import { fetchServiceStatus } from '#services/svc_auth_client'
 import FailedRegistrationMail from '#models/failed_registration_mail'
+import ServiceSettings from '#models/service_settings'
 import type { FailedRegistrationMailKind } from '#models/failed_registration_mail'
 import { notifyOpsAlert } from '#services/ops_alert_service'
 
@@ -178,6 +179,16 @@ export async function sendRegistrationRejectionEmail(
 
 export class DocumentsRelayError extends Error {}
 
+/**
+ * Boîte de l'agent qui reçoit les pièces (et ses copies), réglée une fois
+ * pour tout le service dans Paramètres. À appeler dans une portée
+ * runOnTenant(). Jamais exposée côté citoyen.
+ */
+export async function loadDocumentsDestination(): Promise<{ email: string | null; cc: string[] }> {
+  const settings = await ServiceSettings.first()
+  return { email: settings?.documentContactEmail ?? null, cc: settings?.documentContactCc ?? [] }
+}
+
 export interface DocumentToRelay {
   key: string
   filename: string
@@ -201,12 +212,13 @@ export async function sendDocumentsToAgentEmail(
   documents: DocumentToRelay[],
   options: { resend: boolean }
 ): Promise<void> {
-  if (!event.documentContactEmail) {
+  const destination = await loadDocumentsDestination()
+  if (!destination.email) {
     logger.error(
-      { registrationId: registration.id, eventId: event.id },
-      "registration_mail_service: relais des pièces impossible — l'évènement n'a pas d'adresse de réception (à renseigner dans le formulaire d'évènement)"
+      { registrationId: registration.id, serviceId: registration.serviceId },
+      "registration_mail_service: relais des pièces impossible — le service n'a pas d'adresse de réception (à renseigner dans Services > Paramètres)"
     )
-    throw new DocumentsRelayError('Aucune adresse de réception des pièces pour cet évènement')
+    throw new DocumentsRelayError('Aucune adresse de réception des pièces pour ce service')
   }
 
   const labelByKey = new Map((event.documentRequirements ?? []).map((r) => [r.key, r.label]))
@@ -216,8 +228,8 @@ export async function sendDocumentsToAgentEmail(
 
     await sendMail({
       template: 'inscription_documents_received',
-      to: event.documentContactEmail,
-      cc: event.documentContactCc ?? [],
+      to: destination.email,
+      cc: destination.cc,
       ephemeral: true,
       serviceId: String(registration.serviceId),
       attachments: documents.map((doc) => ({

@@ -125,6 +125,38 @@ export default class InscriptionAgentsController {
     })
   }
 
+  /** GET /inscription/services/:id/settings — adresse de réception des pièces et copies. */
+  async showServiceSettings(ctx: HttpContext) {
+    const { orgId, role, services } = ctx.clientAuth
+    await proxyRequest(ctx, {
+      targetUrl: `${base()}/services/${ctx.params.id}/settings`,
+      jwt: {
+        orgId: String(orgId),
+        scope: 'inscription',
+        role,
+        servicePermissions: buildServicePermissions(services),
+        serviceIds: services.map((s) => s.id),
+        aud: 'svc-inscription',
+      },
+    })
+  }
+
+  /** PUT /inscription/services/:id/settings — modifie ces réglages. */
+  async updateServiceSettings(ctx: HttpContext) {
+    const { orgId, role, services } = ctx.clientAuth
+    await proxyRequest(ctx, {
+      targetUrl: `${base()}/services/${ctx.params.id}/settings`,
+      jwt: {
+        orgId: String(orgId),
+        scope: 'inscription',
+        role,
+        servicePermissions: buildServicePermissions(services),
+        serviceIds: services.map((s) => s.id),
+        aud: 'svc-inscription',
+      },
+    })
+  }
+
   /** POST /inscription/registrations/:id/resend-reminder — relance manuelle. */
   async resendReminder(ctx: HttpContext) {
     const { orgId, role, services } = ctx.clientAuth

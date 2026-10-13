@@ -7,6 +7,7 @@ import db from '@adonisjs/lucid/services/db'
 
 const OtpsController = () => import('#controllers/otps_controller')
 const EventsController = () => import('#controllers/events_controller')
+const ServiceSettingsController = () => import('#controllers/service_settings_controller')
 const RegistrationsController = () => import('#controllers/registrations_controller')
 
 const healthChecks = new HealthChecks().register([new DbCheck(db.connection())])
@@ -34,6 +35,8 @@ router
     router.get('/events/by-slug/:slug', [EventsController, 'showBySlug'])
     router.get('/events/:id', [EventsController, 'show'])
     router.post('/services/:id/events', [EventsController, 'store'])
+    router.get('/services/:id/settings', [ServiceSettingsController, 'show'])
+    router.put('/services/:id/settings', [ServiceSettingsController, 'update'])
     router.patch('/events/:id', [EventsController, 'update'])
     router.post('/events/:id/cancel', [EventsController, 'cancel'])
     router.delete('/events/:id', [EventsController, 'destroy'])

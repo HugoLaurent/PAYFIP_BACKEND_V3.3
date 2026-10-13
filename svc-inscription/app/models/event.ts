@@ -22,7 +22,8 @@ export interface FormField {
 // Une exigence = une pièce nommée que le citoyen dépose dans le formulaire
 // (ex. "Pièce d'identité", "Permis de conduire"). Aucune pièce n'est stockée
 // par PayFiP : elles sont relayées par email à `Event.documentContactEmail`
-// (voir sendDocumentsToAgentEmail). `key` identifie le champ du formulaire.
+// (voir sendDocumentsToAgentEmail) à l'adresse réglée dans les paramètres du
+// service (ServiceSettings). `key` identifie le champ du formulaire.
 export interface DocumentRequirement {
   key: string
   label: string
@@ -83,19 +84,6 @@ export default class Event extends TenantBaseModel {
     prepare: (value: DocumentRequirement[] | null) => (value ? JSON.stringify(value) : null),
   })
   declare documentRequirements: DocumentRequirement[] | null
-
-  // Adresse de l'agent qui REÇOIT les pièces par email. Obligatoire dès que
-  // documentRequirements est non vide (contrôlé dans events_controller.ts).
-  // Jamais exposée côté citoyen.
-  @column()
-  declare documentContactEmail: string | null
-
-  // Copies (CC) de l'email de pièces — par ex. un second agent. Jamais
-  // exposé côté citoyen.
-  @column({
-    prepare: (value: string[] | null) => (value && value.length > 0 ? JSON.stringify(value) : null),
-  })
-  declare documentContactCc: string[] | null
 
   // null = illimité, voir capacity_service.ts.
   @column()

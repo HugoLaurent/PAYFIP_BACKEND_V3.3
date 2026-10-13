@@ -1,6 +1,7 @@
 import { DateTime } from 'luxon'
 import { BaseSeeder } from '@adonisjs/lucid/seeders'
 import Event from '#models/event'
+import ServiceSettings from '#models/service_settings'
 import { runOnTenant } from '#services/tenant_connection_service'
 
 // orgId/serviceId doivent correspondre au seed svc-auth (demo_seeder.ts, org
@@ -20,6 +21,12 @@ const SERVICE_ID = Number(process.env.DEMO_SEED_SERVICE_ID ?? 6)
 export default class extends BaseSeeder {
   async run() {
     await runOnTenant(SERVICE_ID, async () => {
+      // Boîte qui reçoit les pièces justificatives (Services > Paramètres).
+      await ServiceSettings.updateOrCreate(
+        { id: 1 },
+        { documentContactEmail: 'inscriptions@aregie-demo-mixte.test', documentContactCc: [] }
+      )
+
       const swim = await Event.updateOrCreate(
         { orgId: ORG_ID, serviceId: SERVICE_ID, slug: 'natation-adultes-debutant' },
         {
@@ -67,7 +74,6 @@ export default class extends BaseSeeder {
               required: true,
             },
           ],
-          documentContactEmail: 'inscriptions@aregie-demo-mixte.test',
         }
       )
 
