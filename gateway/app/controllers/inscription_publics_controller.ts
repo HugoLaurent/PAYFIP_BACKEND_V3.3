@@ -97,6 +97,15 @@ export default class InscriptionPublicsController {
     })
   }
 
+  /** Case "j'ai bien envoyé mes pièces par email" — voir declareDocumentsSent côté svc-inscription. */
+  async declareDocumentsSent(ctx: HttpContext) {
+    const orgId = await orgIdFromBody(ctx)
+    await proxyRequest(ctx, {
+      targetUrl: `${base()}/registrations/by-token/${ctx.params.accessToken}/documents-sent`,
+      jwt: { orgId, scope: 'inscription', aud: 'svc-inscription' },
+    })
+  }
+
   async cancelRegistration(ctx: HttpContext) {
     const orgId = await orgIdFromBody(ctx)
     await proxyRequest(ctx, {

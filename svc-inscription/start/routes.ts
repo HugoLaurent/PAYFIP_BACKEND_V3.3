@@ -41,6 +41,10 @@ router
     router.post('/registrations', [RegistrationsController, 'store'])
     router.get('/registrations/by-reference/:reference', [RegistrationsController, 'showByReference'])
     router.get('/registrations/by-token/:accessToken', [RegistrationsController, 'showByToken'])
+    router.post('/registrations/by-token/:accessToken/documents-sent', [
+      RegistrationsController,
+      'declareDocumentsSent',
+    ])
     router.post('/registrations/by-token/:accessToken/cancel', [
       RegistrationsController,
       'cancelByToken',

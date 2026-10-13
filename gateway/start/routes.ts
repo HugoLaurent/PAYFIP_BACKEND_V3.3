@@ -132,6 +132,12 @@ router
   ])
   .use(middleware.publicProofRateLimit())
 router
+  .post('/inscription/registrations/by-token/:accessToken/documents-sent', [
+    InscriptionPublicsController,
+    'declareDocumentsSent',
+  ])
+  .use(middleware.publicProofRateLimit())
+router
   .post('/inscription/registrations/by-token/:accessToken/cancel', [
     InscriptionPublicsController,
     'cancelRegistration',

@@ -74,6 +74,12 @@ export default class Registration extends TenantBaseModel {
   @column()
   declare keepExistingDocuments: boolean
 
+  // Déclaration du citoyen "j'ai envoyé mes pièces par email" (voir
+  // registrations_controller.ts#declareDocumentsSent) — pas une preuve, juste
+  // le signal que l'agent peut relire sa messagerie.
+  @column.dateTime()
+  declare documentsSentAt: DateTime | null
+
   @column()
   declare waitlistPosition: number | null
 

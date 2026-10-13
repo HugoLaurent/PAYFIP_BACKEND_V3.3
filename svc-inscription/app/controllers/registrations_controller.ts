@@ -197,6 +197,14 @@ function serializeRegistrationForCitizen(registration: Registration, event: Even
     canSendDocuments:
       registration.status === 'rejected' &&
       (!registration.documentDeadlineAt || registration.documentDeadlineAt > now),
+    // Case "j'ai bien envoyé mon email" : cochable une fois, tant que les
+    // pièces sont attendues (revue en cours, ou refus avant la date limite).
+    documentsSentAt: registration.documentsSentAt?.toISO() ?? null,
+    canDeclareDocumentsSent:
+      registration.documentsSentAt === null &&
+      (registration.status === 'awaiting_review' ||
+        (registration.status === 'rejected' &&
+          (!registration.documentDeadlineAt || registration.documentDeadlineAt > now))),
     canDownloadAttestation: registration.status === 'confirmed',
   }
 }
@@ -216,6 +224,7 @@ function serializeRegistrationForAgent(registration: Registration) {
     rejectionReason: registration.rejectionReason,
     documentDeadlineAt: registration.documentDeadlineAt?.toISO() ?? null,
     keepExistingDocuments: registration.keepExistingDocuments,
+    documentsSentAt: registration.documentsSentAt?.toISO() ?? null,
     waitlistPosition: registration.waitlistPosition,
     reviewedByLabel: registration.reviewedByLabel,
     reviewedAt: registration.reviewedAt?.toISO() ?? null,
@@ -562,6 +571,45 @@ export default class RegistrationsController {
 
     return runOnTenant(found.serviceId, async () => {
       return ctx.response.send({ data: serializeRegistrationForCitizen(found.registration, found.event) })
+    })
+  }
+
+  /**
+   * POST /registrations/by-token/:accessToken/documents-sent — le citoyen
+   * déclare avoir envoyé ses pièces par email. Ne prouve rien (rien n'est
+   * reçu ici) : sert à signaler à l'agent qu'il peut relire sa messagerie.
+   * Depuis `rejected` (pièces refusées, renvoi annoncé), l'inscription
+   * repasse en `awaiting_review` pour réapparaître dans la file de l'agent.
+   * Idempotent : déclarer deux fois ne change rien.
+   */
+  async declareDocumentsSent(ctx: HttpContext) {
+    const found = await resolveRegistrationByAccessToken(ctx.internalAuth.orgId, ctx.params.accessToken)
+    if (!found) return ctx.response.status(404).send({ error: 'registration_not_found' })
+    const { serviceId, registration } = found
+
+    return runOnTenant(serviceId, async () => {
+      const wasRejected = registration.status === 'rejected'
+      if (registration.status !== 'awaiting_review' && !wasRejected) {
+        return ctx.response.status(409).send({ error: 'registration_not_awaiting_documents' })
+      }
+      if (wasRejected && registration.documentDeadlineAt && registration.documentDeadlineAt < DateTime.now()) {
+        return ctx.response.status(422).send({ error: 'document_deadline_passed' })
+      }
+
+      if (!registration.documentsSentAt) {
+        registration.documentsSentAt = DateTime.now()
+        if (wasRejected) {
+          registration.status = 'awaiting_review'
+          registration.rejectionReason = null
+          registration.documentDeadlineAt = null
+          registration.keepExistingDocuments = false
+        }
+        await registration.save()
+      }
+
+      return ctx.response.send({
+        data: { status: registration.status, documentsSentAt: registration.documentsSentAt.toISO() },
+      })
     })
   }
 
@@ -1049,6 +1097,8 @@ export default class RegistrationsController {
         // 'request_more_documents' : les pièces déjà reçues restent
         // valables — seul un vrai 'reject' force à tout renvoyer.
         registration.keepExistingDocuments = payload.decision === 'request_more_documents'
+        // Le citoyen devra re-déclarer son nouvel envoi.
+        registration.documentsSentAt = null
         await registration.save()
 
         await sendRegistrationRejectionEmail(registration, event)
