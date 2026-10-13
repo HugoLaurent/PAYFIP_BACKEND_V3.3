@@ -2,6 +2,7 @@ import logger from '@adonisjs/core/services/logger'
 import { expireStalePaymentAttempts } from '#services/payment_attempt_expiry_service'
 import { retryFailedRegistrationMails } from '#services/registration_mail_retry_service'
 import { processRegistrationExpirations } from '#services/registration_expiry_service'
+import { purgeExpiredRegistrations, purgeExpiredOtpCodes } from '#services/data_retention_service'
 
 // Remplace les commandes ace `payment-attempts:expire`, `registration-mails:retry`
 // et `registrations:process-expirations` (supprimées, voir a229064/0c18deb) :
@@ -44,3 +45,23 @@ setInterval(() => {
       logger.error({ err: error }, '[scheduler] échec de registrations:process-expirations')
     )
 }, FIVE_MINUTES).unref()
+
+// Rétention des données personnelles (voir data_retention_service.ts) : une
+// fois par jour, première passe peu après le démarrage (l'annuaire des bases
+// de service est alors chargé). RETENTION_FIRST_RUN_DELAY_MS n'existe que
+// pour pouvoir tester la purge sans attendre.
+const ONE_DAY = 24 * 60 * 60_000
+const RETENTION_FIRST_RUN_DELAY_MS = Number(process.env.RETENTION_FIRST_RUN_DELAY_MS ?? 10 * 60_000)
+
+function runDaily(label: string, task: () => Promise<number>): void {
+  const run = () =>
+    task()
+      .then((count) => logger.info(`[scheduler] ${label} : ${count} suppression(s)`))
+      .catch((error) => logger.error({ err: error }, `[scheduler] échec de ${label}`))
+
+  setTimeout(run, RETENTION_FIRST_RUN_DELAY_MS).unref()
+  setInterval(run, ONE_DAY).unref()
+}
+
+runDaily('retention:registrations', purgeExpiredRegistrations)
+runDaily('retention:otp-codes', purgeExpiredOtpCodes)
