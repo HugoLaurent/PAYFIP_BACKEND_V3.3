@@ -9,7 +9,7 @@ import { tenantConnectionStorage } from '#services/tenant_connection_service'
 
 /**
  * Base commune aux modèles vivant dans une base par service (Event,
- * Registration, RegistrationDocument, FailedRegistrationMail) : chaque
+ * Registration, FailedRegistrationMail) : chaque
  * méthode statique de requête/écriture lit la connexion tenant active
  * (AsyncLocalStorage, posée par tenant_connection_service.runOnTenant) et
  * la passe explicitement à Lucid — jamais de mutation de la connexion par

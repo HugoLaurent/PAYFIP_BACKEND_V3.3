@@ -35,10 +35,10 @@ export const listRegistrationsValidator = vine.compile(
 
 export const reviewRegistrationValidator = vine.compile(
   vine.object({
-    // 'request_more_documents' : les documents déjà déposés restent
+    // 'request_more_documents' : les pièces déjà reçues par email restent
     // valables, on demande juste un complément (voir
     // registrations_controller.ts#review) — distinct d'un vrai 'reject'
-    // uniquement par ce qui arrive aux documents existants au redépôt.
+    // uniquement par le message affiché au citoyen (complément vs refus).
     // 'revert' : annule une décision prise par erreur (clic sur "Valider"
     // par mégarde), remet en 'awaiting_review' — seulement quand aucun
     // encaissement réel n'a eu lieu, voir #review.

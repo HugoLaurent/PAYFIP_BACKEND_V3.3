@@ -14,8 +14,7 @@ const formFieldValidator = vine.object({
 })
 
 // Une pièce nommée par exigence (voir Event.DocumentRequirement) — plafonné
-// à 5 comme l'ancien MAX_DOCUMENTS côté registrations_controller.ts, pas de
-// raison de permettre davantage de slots de dépôt distincts.
+// à 5, au-delà la liste devient illisible pour le citoyen.
 const documentRequirementValidator = vine.object({
   key: vine.string().trim().minLength(1),
   label: vine.string().trim().minLength(1),
@@ -49,6 +48,7 @@ export const createEventValidator = vine.compile(
       .optional(),
     priceCents: vine.number().min(0),
     documentRequirements: vine.array(documentRequirementValidator).maxLength(5).nullable().optional(),
+    documentContactEmail: vine.string().trim().toLowerCase().email().maxLength(255).nullable().optional(),
     capacity: vine.number().positive().optional(),
     maxParticipantsPerRegistration: vine.number().positive().optional(),
     formSchema: vine.array(formFieldValidator).optional(),
@@ -75,6 +75,7 @@ export const updateEventValidator = vine.compile(
       .optional(),
     priceCents: vine.number().min(0).optional(),
     documentRequirements: vine.array(documentRequirementValidator).maxLength(5).nullable().optional(),
+    documentContactEmail: vine.string().trim().toLowerCase().email().maxLength(255).nullable().optional(),
     capacity: vine.number().positive().nullable().optional(),
     maxParticipantsPerRegistration: vine.number().positive().optional(),
     formSchema: vine.array(formFieldValidator).nullable().optional(),

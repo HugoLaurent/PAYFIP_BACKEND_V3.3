@@ -67,8 +67,7 @@
     "luxon": "^3.7.2",
     "pdfkit": "^0.19.1",
     "pg": "^8.22.0",
-    "reflect-metadata": "^0.2.2",
-    "sharp": "^0.35.3"
+    "reflect-metadata": "^0.2.2"
   },
   "hotHook": {
     "boundaries": [

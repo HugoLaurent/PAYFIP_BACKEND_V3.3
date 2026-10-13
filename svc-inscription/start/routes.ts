@@ -39,13 +39,8 @@ router
     router.delete('/events/:id', [EventsController, 'destroy'])
 
     router.post('/registrations', [RegistrationsController, 'store'])
-    router.post('/registrations/with-documents', [RegistrationsController, 'storeWithDocuments'])
     router.get('/registrations/by-reference/:reference', [RegistrationsController, 'showByReference'])
     router.get('/registrations/by-token/:accessToken', [RegistrationsController, 'showByToken'])
-    router.post('/registrations/by-token/:accessToken/documents', [
-      RegistrationsController,
-      'replaceDocuments',
-    ])
     router.post('/registrations/by-token/:accessToken/cancel', [
       RegistrationsController,
       'cancelByToken',
@@ -73,9 +68,5 @@ router
     router.post('/registrations/:id/review', [RegistrationsController, 'review'])
     router.post('/registrations/:id/resend-reminder', [RegistrationsController, 'resendReminder'])
     router.post('/registrations/:id/cancel', [RegistrationsController, 'cancel'])
-    router.get('/registrations/:id/documents/:documentId', [
-      RegistrationsController,
-      'downloadDocument',
-    ])
   })
   .use(middleware.internalAuth())

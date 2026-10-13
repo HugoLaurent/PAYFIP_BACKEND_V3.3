@@ -19,11 +19,10 @@ export interface FormField {
   options?: string[]
 }
 
-// Une exigence = un slot de dépôt nommé côté citoyen (ex. "Pièce
-// d'identité", "Certificat médical") — jamais un fourre-tout qui
-// forcerait à fusionner plusieurs documents en un seul fichier. `key`
-// identifie aussi le champ multipart envoyé par le front et la colonne
-// `document_key` sur registration_documents (voir registrations_controller.ts).
+// Une exigence = une pièce nommée que le citoyen doit envoyer par email à
+// `Event.documentContactEmail` (ex. "Pièce d'identité", "Permis de
+// conduire"). Aucune pièce n'est stockée par PayFiP : `key` ne sert qu'à
+// identifier l'exigence côté formulaire agent et affichage citoyen.
 export interface DocumentRequirement {
   key: string
   label: string
@@ -84,6 +83,11 @@ export default class Event extends TenantBaseModel {
     prepare: (value: DocumentRequirement[] | null) => (value ? JSON.stringify(value) : null),
   })
   declare documentRequirements: DocumentRequirement[] | null
+
+  // Adresse à laquelle le citoyen envoie ses pièces. Obligatoire dès que
+  // documentRequirements est non vide (contrôlé dans events_controller.ts).
+  @column()
+  declare documentContactEmail: string | null
 
   // null = illimité, voir capacity_service.ts.
   @column()

@@ -20,19 +20,18 @@ const bodyParserConfig = defineConfig({
     ],
   },
 
+  // Plus aucun upload : les pièces justificatives sont envoyées par email
+  // à l'organisme, pas à ce service (voir Event.documentContactEmail).
   multipart: {
-    autoProcess: true,
+    autoProcess: false,
 
     convertEmptyStringsToNull: true,
 
     processManually: [],
 
-    // Cinq justificatifs à 8 Mo max chacun (voir registration_documents,
-    // parcours C) — 40 Mo de marge pour ne pas rejeter un multipart valide
-    // avant même que le contrôleur ait pu vérifier la taille par fichier.
-    limit: '40mb',
+    limit: '1mb',
 
-    types: ['multipart/form-data'],
+    types: [],
   },
 })
 

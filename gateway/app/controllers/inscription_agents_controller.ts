@@ -125,23 +125,6 @@ export default class InscriptionAgentsController {
     })
   }
 
-  async downloadDocument(ctx: HttpContext) {
-    const { orgId, role, services } = ctx.clientAuth
-    await proxyRequest(ctx, {
-      targetUrl: `${base()}/registrations/${ctx.params.id}/documents/${ctx.params.documentId}`,
-      jwt: {
-        orgId: String(orgId),
-        scope: 'inscription',
-        role,
-        servicePermissions: buildServicePermissions(services),
-        serviceIds: services.map((s) => s.id),
-        aud: 'svc-inscription',
-      },
-      binary: true,
-      forwardQueryString: true,
-    })
-  }
-
   /** POST /inscription/registrations/:id/resend-reminder — relance manuelle. */
   async resendReminder(ctx: HttpContext) {
     const { orgId, role, services } = ctx.clientAuth

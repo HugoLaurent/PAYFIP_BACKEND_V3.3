@@ -167,13 +167,55 @@ export async function sendRegistrationRejectionEmail(
         eventTitle: event.title,
         rejectionReason: registration.rejectionReason,
         documentDeadlineAt: registration.documentDeadlineAt?.toFormat('dd/MM/yyyy'),
-        redepositUrl: buildFrontUrl(identity.slug, registration.serviceId, registration.accessToken!, registration.orgId),
+        contactEmail: event.documentContactEmail,
+        registrationReference: registration.paymentReference ?? String(registration.id),
+        statusUrl: buildFrontUrl(identity.slug, registration.serviceId, registration.accessToken!, registration.orgId),
         serviceName: identity.name,
         orgName: identity.orgName,
         logoUrl: identity.logoUrl,
       },
     })
   )
+}
+
+/**
+ * Consignes d'envoi des pièces par email, envoyées quand l'inscription
+ * passe en `awaiting_review` (inscription directe, ou offre de liste
+ * d'attente acceptée). Best-effort, sans ticket de retry : contrairement
+ * aux autres emails du parcours, un échec ici n'est pas bloquant — les
+ * mêmes consignes restent affichées sur la page de suivi de l'inscription.
+ */
+export async function sendDocumentsRequestedEmail(
+  registration: Registration,
+  event: Event
+): Promise<void> {
+  if (!event.documentContactEmail || !event.documentRequirements?.length) return
+
+  try {
+    const identity = await loadServiceIdentity(registration.orgId, registration.serviceId)
+
+    await sendMail({
+      template: 'inscription_documents_requested',
+      to: registration.email,
+      serviceId: String(registration.serviceId),
+      data: {
+        email: registration.email,
+        eventTitle: event.title,
+        documents: event.documentRequirements.map((requirement) => requirement.label),
+        contactEmail: event.documentContactEmail,
+        registrationReference: registration.paymentReference ?? String(registration.id),
+        statusUrl: buildFrontUrl(identity.slug, registration.serviceId, registration.accessToken!, registration.orgId),
+        serviceName: identity.name,
+        orgName: identity.orgName,
+        logoUrl: identity.logoUrl,
+      },
+    })
+  } catch (error) {
+    logger.warn(
+      { registrationId: registration.id, error },
+      "registration_mail_service: échec d'envoi des consignes de pièces (non bloquant)"
+    )
+  }
 }
 
 /**

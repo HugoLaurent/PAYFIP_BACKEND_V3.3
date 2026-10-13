@@ -81,7 +81,7 @@ async function serializeEventForAgent(event: Event) {
   return {
     id: event.id,
     // Nécessaire côté front : les routes agent à :id (update/cancel/
-    // destroy, et review/resend-reminder/documents côté inscriptions)
+    // destroy, et review/resend-reminder côté inscriptions)
     // exigent toutes serviceId en query depuis le split par service — le
     // front le lit ici plutôt que de le redemander à l'utilisateur.
     serviceId: event.serviceId,
@@ -98,6 +98,7 @@ async function serializeEventForAgent(event: Event) {
     registrationDeadline: event.registrationDeadline?.toISO() ?? null,
     priceCents: event.priceCents,
     documentRequirements: event.documentRequirements,
+    documentContactEmail: event.documentContactEmail,
     capacity: event.capacity,
     maxParticipantsPerRegistration: event.maxParticipantsPerRegistration,
     formSchema: event.formSchema,
@@ -126,6 +127,7 @@ async function serializeEventForCitizen(event: Event) {
     registrationDeadline: event.registrationDeadline?.toISO() ?? null,
     priceCents: event.priceCents,
     documentRequirements: event.documentRequirements,
+    documentContactEmail: event.documentContactEmail,
     capacity: event.capacity,
     maxParticipantsPerRegistration: event.maxParticipantsPerRegistration,
     formSchema: event.formSchema,
@@ -393,6 +395,12 @@ export default class EventsController {
 
     const payload = await ctx.request.validateUsing(createEventValidator)
 
+    // Les pièces sont envoyées par email : sans adresse de contact, le
+    // citoyen ne saurait pas où les adresser.
+    if ((payload.documentRequirements?.length ?? 0) > 0 && !payload.documentContactEmail) {
+      return ctx.response.status(422).send({ error: 'document_contact_email_required' })
+    }
+
     return runOnTenant(serviceId, async () => {
       if (payload.slug) {
         const collision = await Event.query()
@@ -420,6 +428,7 @@ export default class EventsController {
         registrationDeadline: payload.registrationDeadline ?? null,
         priceCents: payload.priceCents,
         documentRequirements: payload.documentRequirements ?? null,
+        documentContactEmail: payload.documentContactEmail ?? null,
         capacity: payload.capacity ?? null,
         maxParticipantsPerRegistration: payload.maxParticipantsPerRegistration ?? 1,
         formSchema: payload.formSchema ?? null,
@@ -489,6 +498,10 @@ export default class EventsController {
       if (payload.registrationDeadline !== undefined) event.registrationDeadline = payload.registrationDeadline
       if (payload.priceCents !== undefined) event.priceCents = payload.priceCents
       if (payload.documentRequirements !== undefined) event.documentRequirements = payload.documentRequirements
+      if (payload.documentContactEmail !== undefined) event.documentContactEmail = payload.documentContactEmail
+      if ((event.documentRequirements?.length ?? 0) > 0 && !event.documentContactEmail) {
+        return ctx.response.status(422).send({ error: 'document_contact_email_required' })
+      }
       if (payload.capacity !== undefined) event.capacity = payload.capacity
       if (payload.maxParticipantsPerRegistration !== undefined) {
         event.maxParticipantsPerRegistration = payload.maxParticipantsPerRegistration

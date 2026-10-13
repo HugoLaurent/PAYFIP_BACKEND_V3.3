@@ -119,10 +119,6 @@ router.get('/inscription/events', [InscriptionPublicsController, 'listEvents'])
 router.get('/inscription/events/by-slug/:slug', [InscriptionPublicsController, 'showEventBySlug'])
 router.get('/inscription/events/:id', [InscriptionPublicsController, 'showEvent'])
 router.post('/inscription/registrations', [InscriptionPublicsController, 'createRegistration'])
-router.post('/inscription/registrations/with-documents', [
-  InscriptionPublicsController,
-  'createRegistrationWithDocuments',
-])
 router
   .get('/inscription/registrations/by-reference/:reference', [
     InscriptionPublicsController,
@@ -133,12 +129,6 @@ router
   .get('/inscription/registrations/by-token/:accessToken', [
     InscriptionPublicsController,
     'registrationByToken',
-  ])
-  .use(middleware.publicProofRateLimit())
-router
-  .post('/inscription/registrations/by-token/:accessToken/documents', [
-    InscriptionPublicsController,
-    'replaceRegistrationDocuments',
   ])
   .use(middleware.publicProofRateLimit())
 router
@@ -239,10 +229,6 @@ router
       InscriptionAgentsController,
       'reviewRegistration',
     ])
-    router.get('/inscription/registrations/:id/documents/:documentId', [
-      InscriptionAgentsController,
-      'downloadDocument',
-    ])
     router.post('/inscription/registrations/:id/resend-reminder', [
       InscriptionAgentsController,
       'resendReminder',
@@ -294,10 +280,6 @@ router
     router.post('/staff/registrations/:id/review', [StaffController, 'reviewRegistration'])
     router.post('/staff/registrations/:id/resend-reminder', [StaffController, 'resendRegistrationReminder'])
     router.post('/staff/registrations/:id/cancel', [StaffController, 'cancelRegistration'])
-    router.get('/staff/registrations/:id/documents/:documentId', [
-      StaffController,
-      'downloadRegistrationDocument',
-    ])
     router.get('/staff/services/:id/aregie-mail-key', [StaffController, 'getServiceAregieMailKey'])
     router.put('/staff/services/:id/aregie-mail-key', [StaffController, 'updateServiceAregieMailKey'])
     router.delete('/staff/services/:id/aregie-mail-key', [StaffController, 'deleteServiceAregieMailKey'])

@@ -1,8 +1,7 @@
 import { DateTime } from 'luxon'
-import { belongsTo, column, hasMany } from '@adonisjs/lucid/orm'
-import type { BelongsTo, HasMany } from '@adonisjs/lucid/types/relations'
+import { belongsTo, column } from '@adonisjs/lucid/orm'
+import type { BelongsTo } from '@adonisjs/lucid/types/relations'
 import Event from '#models/event'
-import RegistrationDocument from '#models/registration_document'
 import TenantBaseModel from '#models/tenant_base_model'
 import { REGISTRATION_STATUSES, PAYMENT_METHODS } from '#database/enums'
 
@@ -70,8 +69,8 @@ export default class Registration extends TenantBaseModel {
   declare documentDeadlineAt: DateTime | null
 
   // true seulement après une demande de "document supplémentaire" (pas un
-  // vrai rejet) — indique à replaceDocuments() de ne pas invalider les
-  // documents déjà déposés, voir registrations_controller.ts#review.
+  // vrai rejet) — distingue côté citoyen "il manque un complément" de "vos
+  // pièces sont refusées", voir registrations_controller.ts#review.
   @column()
   declare keepExistingDocuments: boolean
 
@@ -110,7 +109,4 @@ export default class Registration extends TenantBaseModel {
 
   @belongsTo(() => Event)
   declare event: BelongsTo<typeof Event>
-
-  @hasMany(() => RegistrationDocument)
-  declare documents: HasMany<typeof RegistrationDocument>
 }

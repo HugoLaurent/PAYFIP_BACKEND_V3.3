@@ -51,7 +51,7 @@ export default class extends BaseSeeder {
           category: 'Santé',
           title: 'Premiers secours — PSC1',
           description:
-            'Formation certifiante aux gestes qui sauvent, une journée complète. Un certificat médical de non contre-indication est demandé à l’inscription.',
+            'Formation certifiante aux gestes qui sauvent, une journée complète. Un certificat médical de non contre-indication est à envoyer par email après l’inscription.',
           eventDate: DateTime.now().plus({ days: 21 }),
           timeLabel: '9h – 17h',
           location: 'Salle municipale',
@@ -67,6 +67,7 @@ export default class extends BaseSeeder {
               required: true,
             },
           ],
+          documentContactEmail: 'inscriptions@aregie-demo-mixte.test',
         }
       )
 
