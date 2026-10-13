@@ -202,6 +202,10 @@ export async function sendDocumentsToAgentEmail(
   options: { resend: boolean }
 ): Promise<void> {
   if (!event.documentContactEmail) {
+    logger.error(
+      { registrationId: registration.id, eventId: event.id },
+      "registration_mail_service: relais des pièces impossible — l'évènement n'a pas d'adresse de réception (à renseigner dans le formulaire d'évènement)"
+    )
     throw new DocumentsRelayError('Aucune adresse de réception des pièces pour cet évènement')
   }
 
@@ -236,9 +240,11 @@ export async function sendDocumentsToAgentEmail(
       },
     })
   } catch (error) {
-    logger.warn(
-      { registrationId: registration.id, error },
-      "registration_mail_service: échec du relais des pièces justificatives par email"
+    // `err` (et non `error`) : c'est la clé que le logger sérialise avec le
+    // message — sinon l'erreur apparaît comme un objet vide dans les logs.
+    logger.error(
+      { registrationId: registration.id, eventId: event.id, err: error },
+      'registration_mail_service: échec du relais des pièces justificatives par email'
     )
     throw new DocumentsRelayError('Échec du relais des pièces par email')
   }
