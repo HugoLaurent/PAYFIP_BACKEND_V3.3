@@ -21,7 +21,7 @@ export default class EmailsController {
         toEmail: payload.to,
         serviceId: payload.serviceId ?? null,
         data: payload.data,
-        attachments: payload.attachments ?? null,
+        attachments: payload.ephemeral ? null : (payload.attachments ?? null),
         status: 'fake',
         attempts: 0,
       })
@@ -33,12 +33,19 @@ export default class EmailsController {
       toEmail: payload.to,
       serviceId: payload.serviceId ?? null,
       data: payload.data,
-      attachments: payload.attachments ?? null,
+      // Éphémère : les pièces jointes ne sont conservées nulle part, elles
+      // ne vivent que le temps de cet appel (voir attemptDelivery).
+      attachments: payload.ephemeral ? null : (payload.attachments ?? null),
       status: 'pending',
       attempts: 0,
     })
 
-    await attemptDelivery(delivery)
+    await attemptDelivery(
+      delivery,
+      payload.ephemeral
+        ? { attachments: payload.attachments ?? [], cc: payload.cc ?? [], noRetry: true }
+        : undefined
+    )
 
     if (delivery.status !== 'sent') {
       return ctx.response.status(502).send({ error: 'mail_send_failed' })

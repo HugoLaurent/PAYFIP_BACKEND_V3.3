@@ -29,6 +29,7 @@ interface AregieMailResponse {
 // Une clé par service (si configurée) prime sur la clé par défaut.
 async function sendViaAregieMail(params: {
   to: string
+  cc: string[]
   subject: string
   html: string
   serviceId: string | null
@@ -47,6 +48,7 @@ async function sendViaAregieMail(params: {
     },
     body: JSON.stringify({
       to: params.to,
+      ...(params.cc.length > 0 ? { cc: params.cc } : {}),
       subject: params.subject,
       html: params.html,
       attachments: params.attachments.map((attachment) => ({
@@ -64,7 +66,18 @@ async function sendViaAregieMail(params: {
   }
 }
 
-export async function attemptDelivery(delivery: EmailDelivery): Promise<void> {
+interface EphemeralDeliveryOptions {
+  attachments: { filename: string; contentBase64: string; contentType: string }[]
+  cc: string[]
+  // Pas de relance en cas d'échec : les pièces n'étant pas stockées, il n'y
+  // aurait rien à rejouer — l'appelant est prévenu par le 502.
+  noRetry: boolean
+}
+
+export async function attemptDelivery(
+  delivery: EmailDelivery,
+  ephemeral?: EphemeralDeliveryOptions
+): Promise<void> {
   delivery.attempts += 1
 
   try {
@@ -81,12 +94,17 @@ export async function attemptDelivery(delivery: EmailDelivery): Promise<void> {
       )
     }
 
+    // MAIL_TEST_OVERRIDE_EMAIL redirige le destinataire : les copies sont
+    // alors supprimées, sinon un test enverrait des vrais mails en copie.
+    const cc = recipient === delivery.toEmail ? (ephemeral?.cc ?? []) : []
+
     await sendViaAregieMail({
       to: recipient,
+      cc,
       subject: rendered.subject,
       html: rendered.html,
       serviceId: delivery.serviceId,
-      attachments: delivery.attachments ?? [],
+      attachments: ephemeral?.attachments ?? delivery.attachments ?? [],
     })
 
     delivery.status = 'sent'
@@ -99,7 +117,10 @@ export async function attemptDelivery(delivery: EmailDelivery): Promise<void> {
     delivery.error = error instanceof Error ? error.message : String(error)
 
     const ageHours = DateTime.now().diff(delivery.createdAt, 'hours').hours
-    if (ageHours >= MAX_RETRY_AGE_HOURS) {
+    if (ephemeral?.noRetry) {
+      // Envoi éphémère : aucune relance (rien n'est stocké à rejouer).
+      delivery.nextRetryAt = null
+    } else if (ageHours >= MAX_RETRY_AGE_HOURS) {
       // nextRetryAt=null exclut la ligne de retryFailedDeliveries() (qui
       // filtre nextRetryAt <= now) sans avoir besoin d'un statut dédié.
       delivery.nextRetryAt = null

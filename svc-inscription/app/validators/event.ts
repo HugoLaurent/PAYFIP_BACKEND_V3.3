@@ -49,6 +49,11 @@ export const createEventValidator = vine.compile(
     priceCents: vine.number().min(0),
     documentRequirements: vine.array(documentRequirementValidator).maxLength(5).nullable().optional(),
     documentContactEmail: vine.string().trim().toLowerCase().email().maxLength(255).nullable().optional(),
+    documentContactCc: vine
+      .array(vine.string().trim().toLowerCase().email().maxLength(255))
+      .maxLength(4)
+      .nullable()
+      .optional(),
     capacity: vine.number().positive().optional(),
     maxParticipantsPerRegistration: vine.number().positive().optional(),
     formSchema: vine.array(formFieldValidator).optional(),
@@ -76,6 +81,11 @@ export const updateEventValidator = vine.compile(
     priceCents: vine.number().min(0).optional(),
     documentRequirements: vine.array(documentRequirementValidator).maxLength(5).nullable().optional(),
     documentContactEmail: vine.string().trim().toLowerCase().email().maxLength(255).nullable().optional(),
+    documentContactCc: vine
+      .array(vine.string().trim().toLowerCase().email().maxLength(255))
+      .maxLength(4)
+      .nullable()
+      .optional(),
     capacity: vine.number().positive().nullable().optional(),
     maxParticipantsPerRegistration: vine.number().positive().optional(),
     formSchema: vine.array(formFieldValidator).nullable().optional(),

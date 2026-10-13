@@ -119,6 +119,10 @@ router.get('/inscription/events', [InscriptionPublicsController, 'listEvents'])
 router.get('/inscription/events/by-slug/:slug', [InscriptionPublicsController, 'showEventBySlug'])
 router.get('/inscription/events/:id', [InscriptionPublicsController, 'showEvent'])
 router.post('/inscription/registrations', [InscriptionPublicsController, 'createRegistration'])
+router.post('/inscription/registrations/with-documents', [
+  InscriptionPublicsController,
+  'createRegistrationWithDocuments',
+])
 router
   .get('/inscription/registrations/by-reference/:reference', [
     InscriptionPublicsController,
@@ -132,9 +136,9 @@ router
   ])
   .use(middleware.publicProofRateLimit())
 router
-  .post('/inscription/registrations/by-token/:accessToken/documents-sent', [
+  .post('/inscription/registrations/by-token/:accessToken/documents', [
     InscriptionPublicsController,
-    'declareDocumentsSent',
+    'replaceRegistrationDocuments',
   ])
   .use(middleware.publicProofRateLimit())
 router

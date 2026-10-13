@@ -10,11 +10,7 @@ export interface InscriptionRegistrationRejectedEmailData {
   // Déjà formatée en chaîne d'affichage par l'appelant, même convention
   // que les autres dates transmises aux templates svc-mail.
   documentDeadlineAt: string
-  // Adresse à laquelle renvoyer les pièces, et référence à citer dans
-  // l'objet — aucun fichier ne transite par PayFiP.
-  contactEmail: string
-  registrationReference: string
-  statusUrl: string
+  redepositUrl: string
   serviceName?: string
   orgName?: string
   logoUrl?: string
@@ -34,7 +30,7 @@ export function renderInscriptionRegistrationRejectedEmail(
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Pièces à compléter</title>
+  <title>Justificatif à compléter</title>
 </head>
 <body style="margin:0; padding:0; background-color:#f2f5fb; font-family:'Segoe UI', Roboto, sans-serif; color:#121b29;">
   <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#f2f5fb; padding:32px 0;">
@@ -55,8 +51,8 @@ export function renderInscriptionRegistrationRejectedEmail(
           }
 
           <tr><td style="padding:${data.logoUrl ? '10' : '24'}px 32px 0; text-align:center; font-size:11px; font-weight:600; letter-spacing:1.4px; color:#7b8189;">${escapeHtml((data.serviceName ?? 'INSCRIPTION').toUpperCase())}</td></tr>
-          <tr><td style="padding:14px 32px 0; text-align:center; font-size:24px; font-weight:800; line-height:30px; color:#121b29;">Vos pièces doivent être complétées</td></tr>
-          <tr><td style="padding:10px 32px 0; text-align:center; font-size:15px; line-height:23px; color:#4f5661;">Les pièces reçues pour <strong>${escapeHtml(data.eventTitle)}</strong> n'ont pas pu être validées. Votre place reste réservée, à condition de renvoyer les pièces demandées par email avant la date limite.</td></tr>
+          <tr><td style="padding:14px 32px 0; text-align:center; font-size:24px; font-weight:800; line-height:30px; color:#121b29;">Votre justificatif doit être complété</td></tr>
+          <tr><td style="padding:10px 32px 0; text-align:center; font-size:15px; line-height:23px; color:#4f5661;">Votre justificatif pour <strong>${escapeHtml(data.eventTitle)}</strong> n'a pas pu être validé. Votre place reste réservée, à condition de déposer un nouveau document avant la date limite.</td></tr>
 
           <tr><td style="padding:22px 32px 0;">
             <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#f2f5fb; border-radius:12px;">
@@ -70,19 +66,8 @@ export function renderInscriptionRegistrationRejectedEmail(
           <tr><td style="padding:20px 32px 0;">
             <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:${BLUE_TINT}; border-radius:12px;">
               <tr><td style="padding:16px 20px;">
-                <div style="font-size:11px; font-weight:600; letter-spacing:1.4px; color:${AREGIE_BLUE};">DATE LIMITE D'ENVOI</div>
+                <div style="font-size:11px; font-weight:600; letter-spacing:1.4px; color:${AREGIE_BLUE};">DATE LIMITE DE RE-DÉPÔT</div>
                 <div style="padding-top:6px; font-size:20px; font-weight:800; color:${AREGIE_BLUE};">${escapeHtml(data.documentDeadlineAt)}</div>
-              </td></tr>
-            </table>
-          </td></tr>
-
-          <tr><td style="padding:20px 32px 0;">
-            <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#f2f5fb; border-radius:12px;">
-              <tr><td style="padding:16px 20px;">
-                <div style="font-size:11px; font-weight:600; letter-spacing:1.4px; color:#7b8189;">ADRESSE D'ENVOI</div>
-                <div style="padding-top:6px; font-size:18px; font-weight:800; color:#121b29;">${escapeHtml(data.contactEmail)}</div>
-                <div style="padding-top:12px; font-size:11px; font-weight:600; letter-spacing:1.4px; color:#7b8189;">OBJET DE L'EMAIL</div>
-                <div style="padding-top:6px; font-size:18px; font-weight:800; color:#121b29;">${escapeHtml(`Pièces ${data.registrationReference}`)}</div>
               </td></tr>
             </table>
           </td></tr>
@@ -91,13 +76,13 @@ export function renderInscriptionRegistrationRejectedEmail(
             <table cellpadding="0" cellspacing="0" border="0">
               <tr>
                 <td align="center" style="border-radius:10px; background-color:${MARINE};">
-                  <a href="${escapeHtml(data.statusUrl)}" style="display:inline-block; padding:14px 32px; font-size:15px; font-weight:700; color:#ffffff; text-decoration:none;">Suivre mon inscription</a>
+                  <a href="${escapeHtml(data.redepositUrl)}" style="display:inline-block; padding:14px 32px; font-size:15px; font-weight:700; color:#ffffff; text-decoration:none;">Déposer un nouveau document</a>
                 </td>
               </tr>
             </table>
           </td></tr>
 
-          <tr><td align="center" style="padding:20px 32px 28px; font-size:13px; line-height:20px; color:#7b8189;">Sans nouvel envoi avant la date limite, votre place sera libérée et proposée à une autre personne.</td></tr>
+          <tr><td align="center" style="padding:20px 32px 28px; font-size:13px; line-height:20px; color:#7b8189;">Sans nouveau dépôt avant la date limite, votre place sera libérée et proposée à une autre personne.</td></tr>
 
           <tr><td align="right" style="padding:24px 32px; background-color:#f2f5fb; border-top:1px solid #dee1e7; font-size:12px; line-height:19px; color:#7b8189;">${
             data.orgName || data.serviceName

@@ -39,11 +39,12 @@ router
     router.delete('/events/:id', [EventsController, 'destroy'])
 
     router.post('/registrations', [RegistrationsController, 'store'])
+    router.post('/registrations/with-documents', [RegistrationsController, 'storeWithDocuments'])
     router.get('/registrations/by-reference/:reference', [RegistrationsController, 'showByReference'])
     router.get('/registrations/by-token/:accessToken', [RegistrationsController, 'showByToken'])
-    router.post('/registrations/by-token/:accessToken/documents-sent', [
+    router.post('/registrations/by-token/:accessToken/documents', [
       RegistrationsController,
-      'declareDocumentsSent',
+      'replaceDocuments',
     ])
     router.post('/registrations/by-token/:accessToken/cancel', [
       RegistrationsController,

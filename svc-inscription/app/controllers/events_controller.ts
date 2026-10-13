@@ -99,6 +99,7 @@ async function serializeEventForAgent(event: Event) {
     priceCents: event.priceCents,
     documentRequirements: event.documentRequirements,
     documentContactEmail: event.documentContactEmail,
+    documentContactCc: event.documentContactCc ?? [],
     capacity: event.capacity,
     maxParticipantsPerRegistration: event.maxParticipantsPerRegistration,
     formSchema: event.formSchema,
@@ -127,7 +128,6 @@ async function serializeEventForCitizen(event: Event) {
     registrationDeadline: event.registrationDeadline?.toISO() ?? null,
     priceCents: event.priceCents,
     documentRequirements: event.documentRequirements,
-    documentContactEmail: event.documentContactEmail,
     capacity: event.capacity,
     maxParticipantsPerRegistration: event.maxParticipantsPerRegistration,
     formSchema: event.formSchema,
@@ -429,6 +429,7 @@ export default class EventsController {
         priceCents: payload.priceCents,
         documentRequirements: payload.documentRequirements ?? null,
         documentContactEmail: payload.documentContactEmail ?? null,
+        documentContactCc: payload.documentContactCc ?? null,
         capacity: payload.capacity ?? null,
         maxParticipantsPerRegistration: payload.maxParticipantsPerRegistration ?? 1,
         formSchema: payload.formSchema ?? null,
@@ -499,6 +500,7 @@ export default class EventsController {
       if (payload.priceCents !== undefined) event.priceCents = payload.priceCents
       if (payload.documentRequirements !== undefined) event.documentRequirements = payload.documentRequirements
       if (payload.documentContactEmail !== undefined) event.documentContactEmail = payload.documentContactEmail
+      if (payload.documentContactCc !== undefined) event.documentContactCc = payload.documentContactCc
       if ((event.documentRequirements?.length ?? 0) > 0 && !event.documentContactEmail) {
         return ctx.response.status(422).send({ error: 'document_contact_email_required' })
       }

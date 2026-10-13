@@ -74,9 +74,10 @@ export default class Registration extends TenantBaseModel {
   @column()
   declare keepExistingDocuments: boolean
 
-  // Déclaration du citoyen "j'ai envoyé mes pièces par email" (voir
-  // registrations_controller.ts#declareDocumentsSent) — pas une preuve, juste
-  // le signal que l'agent peut relire sa messagerie.
+  // Date à laquelle les pièces justificatives ont été relayées par email à
+  // l'agent (inscription, ou renvoi après un refus) — voir
+  // registration_mail_service.ts#sendDocumentsToAgentEmail. Aucune pièce n'est
+  // conservée : cette date est la seule trace côté PayFiP.
   @column.dateTime()
   declare documentsSentAt: DateTime | null
 

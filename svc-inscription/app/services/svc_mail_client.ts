@@ -22,6 +22,12 @@ export interface SendMailParams {
   serviceId?: string
   data: Record<string, unknown>
   attachments?: MailAttachment[]
+  // Copies (CC) — uniquement pour un envoi `ephemeral`.
+  cc?: string[]
+  // Envoi éphémère : svc-mail ne stocke pas les pièces jointes et ne rejoue
+  // pas un échec (voir svc-mail, emails_controller.ts). Utilisé pour relayer
+  // les pièces justificatives des citoyens.
+  ephemeral?: boolean
 }
 
 export async function sendMail(params: SendMailParams): Promise<{ sent: boolean }> {
@@ -33,11 +39,16 @@ export async function sendMail(params: SendMailParams): Promise<{ sent: boolean 
     .setAudience('svc-mail')
     .sign(privateKey)
 
-  const response = await fetchWithTimeout(`${env.get('SVC_MAIL_BASE_URL')}/emails`, {
+  const request = {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
     body: JSON.stringify(params),
-  })
+  }
+  // Pièces jointes jusqu'à ~13 Mo en base64, relayées jusqu'à AREGIE Mail :
+  // le délai par défaut (15 s) est trop court pour un envoi éphémère.
+  const response = params.ephemeral
+    ? await fetch(`${env.get('SVC_MAIL_BASE_URL')}/emails`, { ...request, signal: AbortSignal.timeout(90_000) })
+    : await fetchWithTimeout(`${env.get('SVC_MAIL_BASE_URL')}/emails`, request)
 
   if (!response.ok) {
     throw new Error(`svc-mail a répondu ${response.status}`)

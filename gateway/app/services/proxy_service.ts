@@ -1,4 +1,5 @@
-import { readFile } from 'node:fs/promises'
+import { readFile, unlink } from 'node:fs/promises'
+import type { MultipartFile } from '@adonisjs/bodyparser/types'
 import type { HttpContext } from '@adonisjs/core/http'
 import { mintInternalJwt, type InternalJwtClaims } from '#services/internal_jwt_service'
 import { fetchWithTimeout } from '#services/fetch_with_timeout'
@@ -160,4 +161,100 @@ export async function proxyUpload(ctx: HttpContext, options: ProxyUploadOptions)
   }
 
   ctx.response.status(response.status).send(body)
+}
+
+export interface ProxyMultipartUploadOptions {
+  targetUrl: string
+  jwt: InternalJwtClaims
+  maxSize: string
+  extnames: string[]
+  fields: string[]
+}
+
+/**
+ * Comme proxyUpload, mais pour des dépôts qui portent plusieurs fichiers
+ * ET des champs texte à côté (ex. justificatifs d'inscription : email,
+ * nom, prénom, eventId + 1 à N fichiers) — proxyUpload reste dédié au cas
+ * logo/cover à un seul fichier, sans autre champ, pour ne pas complexifier
+ * ce chemin qui reste le plus fréquent.
+ *
+ * Ne suppose plus un unique nom de champ fichier : chaque exigence de
+ * document a sa propre clé côté citoyen (voir DocumentRequirement,
+ * FileUploadField), le nombre et les noms des champs multipart ne sont
+ * connus qu'à la requête — on relaie donc tout fichier présent, sous son
+ * nom de champ d'origine.
+ */
+export async function proxyMultipartUpload(
+  ctx: HttpContext,
+  options: ProxyMultipartUploadOptions
+): Promise<void> {
+  const fieldNames = Object.keys(ctx.request.allFiles())
+  const fileOptions = { size: options.maxSize, extnames: options.extnames }
+
+  const namedFiles: Array<{ field: string; file: MultipartFile }> = []
+  for (const field of fieldNames) {
+    for (const file of ctx.request.files(field, fileOptions)) {
+      namedFiles.push({ field, file })
+    }
+  }
+
+  // Les pièces justificatives ne sont jamais conservées : les fichiers
+  // temporaires reçus par le gateway sont supprimés dès qu'ils ont été lus
+  // (ou refusés), avant même l'appel au service cible.
+  const cleanup = () =>
+    Promise.all(namedFiles.map(({ file }) => (file.tmpPath ? unlink(file.tmpPath).catch(() => undefined) : undefined)))
+
+  if (namedFiles.length === 0) {
+    ctx.response.status(400).send({ error: 'documents_required' })
+    return
+  }
+  const invalid = namedFiles.find(({ file }) => !file.isValid)
+  if (invalid) {
+    await cleanup()
+    ctx.response
+      .status(400)
+      .send({ error: `invalid_${invalid.field}`, detail: invalid.file.errors })
+    return
+  }
+
+  const uploadFormData = new FormData()
+  try {
+    for (const { field, file } of namedFiles) {
+      const buffer = await readFile(file.tmpPath!)
+      uploadFormData.append(field, new Blob([buffer], { type: `${file.type}/${file.subtype}` }), file.clientName)
+    }
+  } finally {
+    await cleanup()
+  }
+  for (const field of options.fields) {
+    const value = ctx.request.input(field)
+    if (value !== undefined && value !== null) {
+      uploadFormData.append(field, String(value))
+    }
+  }
+
+  // Pas de Content-Type manuel : FormData génère lui-même le boundary
+  // multipart, le fixer à la main casserait l'encodage.
+  let uploadResponse: Response
+  try {
+    uploadResponse = await fetchWithTimeout(options.targetUrl, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${await mintInternalJwt(options.jwt)}` },
+      body: uploadFormData,
+      redirect: 'manual',
+    })
+  } catch (error) {
+    const { status, body } = proxyErrorResponse(error)
+    ctx.response.status(status).send(body)
+    return
+  }
+
+  let uploadBody: unknown = null
+  try {
+    uploadBody = await uploadResponse.json()
+  } catch {
+    uploadBody = null
+  }
+
+  ctx.response.status(uploadResponse.status).send(uploadBody)
 }

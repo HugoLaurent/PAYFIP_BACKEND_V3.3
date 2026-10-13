@@ -5,7 +5,7 @@ import { renderInvoiceConfirmationEmail } from '#services/invoice_confirmation_m
 import { renderInscriptionConfirmationEmail } from '#services/inscription_confirmation_mail_template'
 import { renderInscriptionPaymentRequestEmail } from '#services/inscription_payment_request_mail_template'
 import { renderInscriptionRegistrationRejectedEmail } from '#services/inscription_registration_rejected_mail_template'
-import { renderInscriptionDocumentsRequestedEmail } from '#services/inscription_documents_requested_mail_template'
+import { renderInscriptionDocumentsReceivedEmail } from '#services/inscription_documents_received_mail_template'
 import { renderInscriptionWaitlistOfferEmail } from '#services/inscription_waitlist_offer_mail_template'
 import { renderInscriptionEventCancelledEmail } from '#services/inscription_event_cancelled_mail_template'
 import { renderInscriptionAgentReviewNeededEmail } from '#services/inscription_agent_review_needed_mail_template'
@@ -17,7 +17,7 @@ export const MAIL_TEMPLATE_NAMES = [
   'inscription_confirmation',
   'inscription_payment_request',
   'inscription_registration_rejected',
-  'inscription_documents_requested',
+  'inscription_documents_received',
   'inscription_waitlist_offer',
   'inscription_event_cancelled',
   'inscription_agent_review_needed',
@@ -101,23 +101,21 @@ const inscriptionRegistrationRejectedValidator = vine.compile(
     eventTitle: vine.string().trim().minLength(1),
     rejectionReason: vine.string().trim().minLength(1),
     documentDeadlineAt: vine.string().trim().minLength(1),
-    contactEmail: vine.string().trim().email(),
-    registrationReference: vine.string().trim().minLength(1),
-    statusUrl: vine.string().trim().url(),
+    redepositUrl: vine.string().trim().url(),
     serviceName: vine.string().trim().optional(),
     orgName: vine.string().trim().optional(),
     logoUrl: vine.string().trim().url({ require_tld: false }).optional(),
   })
 )
 
-const inscriptionDocumentsRequestedValidator = vine.compile(
+const inscriptionDocumentsReceivedValidator = vine.compile(
   vine.object({
-    email: vine.string().trim().email(),
     eventTitle: vine.string().trim().minLength(1),
-    documents: vine.array(vine.string().trim().minLength(1)).minLength(1),
-    contactEmail: vine.string().trim().email(),
+    participantName: vine.string().trim().minLength(1),
+    participantEmail: vine.string().trim().email(),
     registrationReference: vine.string().trim().minLength(1),
-    statusUrl: vine.string().trim().url(),
+    documents: vine.array(vine.string().trim().minLength(1)).minLength(1),
+    resend: vine.boolean(),
     serviceName: vine.string().trim().optional(),
     orgName: vine.string().trim().optional(),
     logoUrl: vine.string().trim().url({ require_tld: false }).optional(),
@@ -196,15 +194,15 @@ export async function renderMailTemplate(
     case 'inscription_registration_rejected': {
       const parsed = await inscriptionRegistrationRejectedValidator.validate(data)
       return {
-        subject: 'Vos pièces doivent être complétées',
+        subject: 'Votre justificatif doit être complété',
         html: renderInscriptionRegistrationRejectedEmail(parsed),
       }
     }
-    case 'inscription_documents_requested': {
-      const parsed = await inscriptionDocumentsRequestedValidator.validate(data)
+    case 'inscription_documents_received': {
+      const parsed = await inscriptionDocumentsReceivedValidator.validate(data)
       return {
-        subject: 'Envoyez vos pièces pour finaliser votre inscription',
-        html: renderInscriptionDocumentsRequestedEmail(parsed),
+        subject: `${parsed.resend ? 'Pièces renvoyées' : 'Pièces à vérifier'} — ${parsed.participantName} — ${parsed.registrationReference}`,
+        html: renderInscriptionDocumentsReceivedEmail(parsed),
       }
     }
     case 'inscription_waitlist_offer': {

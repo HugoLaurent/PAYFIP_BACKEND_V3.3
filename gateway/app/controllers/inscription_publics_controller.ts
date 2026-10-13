@@ -1,6 +1,6 @@
 import type { HttpContext } from '@adonisjs/core/http'
 import env from '#start/env'
-import { proxyRequest } from '#services/proxy_service'
+import { proxyRequest, proxyMultipartUpload } from '#services/proxy_service'
 import { orgIdValidator } from '#validators/org_id'
 
 const base = () => env.get('SVC_INSCRIPTION_BASE_URL')
@@ -75,6 +75,32 @@ export default class InscriptionPublicsController {
   }
 
   /**
+   * Dépôt initial d'inscription avec justificatifs — multipart, un fichier
+   * par exigence nommée (clé = DocumentRequirement.key, jusqu'à 5), plus
+   * les champs texte de l'inscription à côté (voir proxyMultipartUpload :
+   * proxyRequest ne relaie que du JSON).
+   */
+  async createRegistrationWithDocuments(ctx: HttpContext) {
+    const orgId = await orgIdFromBody(ctx)
+    await proxyMultipartUpload(ctx, {
+      targetUrl: `${base()}/registrations/with-documents`,
+      jwt: { orgId, scope: 'inscription', aud: 'svc-inscription' },
+      maxSize: '5mb',
+      extnames: ['pdf', 'png', 'jpg', 'jpeg'],
+      fields: [
+        'eventId',
+        'serviceId',
+        'email',
+        'firstName',
+        'lastName',
+        'quantity',
+        'formResponses',
+        'frontRedirectUrl',
+      ],
+    })
+  }
+
+  /**
    * Retour PayFiP : le front n'a que sourceReference + idop dans l'URL,
    * pas l'accessToken (même position que orderTicketsByReference côté
    * billetterie).
@@ -97,12 +123,15 @@ export default class InscriptionPublicsController {
     })
   }
 
-  /** Case "j'ai bien envoyé mes pièces par email" — voir declareDocumentsSent côté svc-inscription. */
-  async declareDocumentsSent(ctx: HttpContext) {
+  /** Re-dépôt de justificatifs après rejet — même contrainte multipart que le dépôt initial. */
+  async replaceRegistrationDocuments(ctx: HttpContext) {
     const orgId = await orgIdFromBody(ctx)
-    await proxyRequest(ctx, {
-      targetUrl: `${base()}/registrations/by-token/${ctx.params.accessToken}/documents-sent`,
+    await proxyMultipartUpload(ctx, {
+      targetUrl: `${base()}/registrations/by-token/${ctx.params.accessToken}/documents`,
       jwt: { orgId, scope: 'inscription', aud: 'svc-inscription' },
+      maxSize: '5mb',
+      extnames: ['pdf', 'png', 'jpg', 'jpeg'],
+      fields: [],
     })
   }
 

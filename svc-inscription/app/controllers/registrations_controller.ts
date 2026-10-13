@@ -1,11 +1,12 @@
 import { randomUUID } from 'node:crypto'
+import { readFile, unlink } from 'node:fs/promises'
 import { DateTime } from 'luxon'
 import vine from '@vinejs/vine'
 import type { HttpContext } from '@adonisjs/core/http'
 import logger from '@adonisjs/core/services/logger'
 import db from '@adonisjs/lucid/services/db'
 import Event from '#models/event'
-import type { FormField } from '#models/event'
+import type { FormField, DocumentRequirement } from '#models/event'
 import Registration from '#models/registration'
 import RegistrationPaymentAttempt from '#models/registration_payment_attempt'
 import {
@@ -33,8 +34,11 @@ import {
   sendRegistrationConfirmationEmail,
   sendPaymentRequestEmail,
   sendRegistrationRejectionEmail,
-  sendDocumentsRequestedEmail,
+  sendDocumentsToAgentEmail,
+  DocumentsRelayError,
 } from '#services/registration_mail_service'
+import type { DocumentToRelay } from '#services/registration_mail_service'
+import { hasValidDocumentSignature } from '#services/document_validation_service'
 import { notifyOpsAlert } from '#services/ops_alert_service'
 import {
   runOnTenant,
@@ -50,6 +54,14 @@ import {
 function currentTenantDb() {
   return db.connection(tenantConnectionStorage.getStore()!)
 }
+
+// Pièces justificatives : PDF/PNG/JPEG, 5 Mo par fichier et 10 Mo au total
+// (un email porte ~15 Mo au maximum une fois encodé, voir Mailjet) — jamais
+// stockées, relayées par email à l'agent (voir sendDocumentsToAgentEmail).
+const DOCUMENT_MAX_FILE_SIZE = '5mb'
+const DOCUMENT_MAX_TOTAL_BYTES = 10 * 1024 * 1024
+const DOCUMENT_EXTNAMES = ['pdf', 'png', 'jpg', 'jpeg']
+const DOCUMENT_ALLOWED_MIME_TYPES = ['application/pdf', 'image/png', 'image/jpeg']
 
 // Renvoi des pièces après rejet : le citoyen dispose de 7 jours (pour
 // renvoyer un nouvel email à l'organisme) avant que la place soit libérée
@@ -170,11 +182,9 @@ function serializeRegistrationForCitizen(registration: Registration, event: Even
     // Distingue "vos documents sont refusés" de "il ne manque qu'un
     // complément" côté citoyen — voir RegistrationRejected.tsx.
     keepExistingDocuments: registration.keepExistingDocuments,
-    // Pièces à envoyer par email (liste nommée) et adresse de destination :
-    // c'est tout ce que voit le citoyen, aucun fichier ne transite par
-    // PayFiP. La référence à citer dans l'objet est registrationReference.
+    // Pour afficher les mêmes slots de dépôt nommés qu'à l'inscription
+    // initiale sur l'écran de redépôt (voir RegistrationRejected.tsx).
     documentRequirements: event.documentRequirements,
-    documentContactEmail: event.documentContactEmail,
     waitlistPosition: registration.waitlistPosition,
     waitlistNotifiedAt: registration.waitlistNotifiedAt?.toISO() ?? null,
     waitlistResponseDeadline: registration.waitlistResponseDeadline?.toISO() ?? null,
@@ -192,19 +202,11 @@ function serializeRegistrationForCitizen(registration: Registration, event: Even
       registration.waitlistNotifiedAt !== null &&
       (registration.waitlistResponseDeadline === null || registration.waitlistResponseDeadline > now),
     canRetryPayment: registration.status === 'cancelled' && registration.payfipIdOp !== null,
-    // Pièces refusées/à compléter : le citoyen peut encore renvoyer un
-    // email avant la date limite.
-    canSendDocuments:
+    // Pièces refusées/à compléter : le citoyen peut encore redéposer avant la
+    // date limite (elles repartent par email à l'agent, rien n'est stocké).
+    canReplaceDocuments:
       registration.status === 'rejected' &&
       (!registration.documentDeadlineAt || registration.documentDeadlineAt > now),
-    // Case "j'ai bien envoyé mon email" : cochable une fois, tant que les
-    // pièces sont attendues (revue en cours, ou refus avant la date limite).
-    documentsSentAt: registration.documentsSentAt?.toISO() ?? null,
-    canDeclareDocumentsSent:
-      registration.documentsSentAt === null &&
-      (registration.status === 'awaiting_review' ||
-        (registration.status === 'rejected' &&
-          (!registration.documentDeadlineAt || registration.documentDeadlineAt > now))),
     canDownloadAttestation: registration.status === 'confirmed',
   }
 }
@@ -349,12 +351,10 @@ export default class RegistrationsController {
   }
 
   /**
-   * POST /registrations — inscription, JSON. Si l'évènement exige des
-   * pièces, aucun fichier n'est reçu ici : l'inscription passe en
-   * `awaiting_review` et le citoyen envoie ses pièces par email à
-   * `event.documentContactEmail`, en citant sa référence. L'email doit
-   * avoir été vérifié par OTP juste avant. Un évènement complet ne refuse
-   * jamais : la place passe en liste d'attente (voir capacity_service).
+   * POST /registrations — inscription simple (sans justificatif), JSON.
+   * L'email doit avoir été vérifié par OTP juste avant. Un évènement
+   * complet ne refuse jamais : la place passe en liste d'attente (voir
+   * capacity_service).
    */
   async store(ctx: HttpContext) {
     const payload = await ctx.request.validateUsing(createRegistrationValidator)
@@ -371,6 +371,10 @@ export default class RegistrationsController {
         .where('status', 'published')
         .first()
       if (!event) return ctx.response.status(404).send({ error: 'event_not_found' })
+
+      if (eventRequiresDocuments(event)) {
+        return ctx.response.status(422).send({ error: 'documents_required' })
+      }
 
       if (event.registrationDeadline && event.registrationDeadline < DateTime.now()) {
         return ctx.response.status(422).send({ error: 'registration_closed' })
@@ -398,6 +402,166 @@ export default class RegistrationsController {
   }
 
   /**
+   * POST /registrations/with-documents — inscription avec dépôt de
+   * pièces justificatives, multipart (relayées par email à l'agent, jamais stockées). Les champs scalaires sont lus et validés à
+   * la main (pas de vine sur un body multipart, comme uploadLogo côté
+   * svc-auth) ; `formResponses`, s'il existe, est transmis en JSON string
+   * dans un champ du même nom.
+   */
+  async storeWithDocuments(ctx: HttpContext) {
+    const { orgId } = ctx.internalAuth
+
+    const fields = ctx.request.only([
+      'email',
+      'firstName',
+      'lastName',
+      'eventId',
+      'serviceId',
+      'quantity',
+      'formResponses',
+      'frontRedirectUrl',
+    ])
+
+    const email = typeof fields.email === 'string' ? fields.email.trim() : ''
+    const firstName = typeof fields.firstName === 'string' ? fields.firstName.trim() : ''
+    const lastName = typeof fields.lastName === 'string' ? fields.lastName.trim() : ''
+    const eventId = Number(fields.eventId)
+    const serviceId = Number(fields.serviceId)
+    const quantity = fields.quantity ? Number(fields.quantity) : 1
+    const frontRedirectUrl = typeof fields.frontRedirectUrl === 'string' ? fields.frontRedirectUrl : ''
+
+    if (
+      !email ||
+      !firstName ||
+      !lastName ||
+      !Number.isFinite(eventId) ||
+      !Number.isFinite(serviceId) ||
+      !frontRedirectUrl
+    ) {
+      return ctx.response.status(422).send({ error: 'invalid_payload' })
+    }
+
+    let formResponses: Record<string, unknown> | null = null
+    if (typeof fields.formResponses === 'string' && fields.formResponses.length > 0) {
+      try {
+        formResponses = JSON.parse(fields.formResponses)
+      } catch {
+        return ctx.response.status(422).send({ error: 'invalid_form_responses', detail: 'not_json' })
+      }
+    }
+
+    const verified = await isEmailVerified(email)
+    if (!verified) return ctx.response.status(403).send({ error: 'email_not_otp_verified' })
+
+    return runOnTenant(serviceId, async () => {
+      const event = await Event.query()
+        .where('id', eventId)
+        .where('orgId', orgId)
+        .where('serviceId', serviceId)
+        .where('status', 'published')
+        .first()
+      if (!event) return ctx.response.status(404).send({ error: 'event_not_found' })
+
+      if (event.registrationDeadline && event.registrationDeadline < DateTime.now()) {
+        return ctx.response.status(422).send({ error: 'registration_closed' })
+      }
+
+      if (quantity > event.maxParticipantsPerRegistration) {
+        return ctx.response.status(422).send({ error: 'quantity_exceeds_max' })
+      }
+
+      const formError = validateFormResponses(event.formSchema, formResponses)
+      if (formError) {
+        return ctx.response.status(422).send({ error: 'invalid_form_responses', detail: formError })
+      }
+
+      const requirements = event.documentRequirements ?? []
+      if (requirements.length === 0) {
+        return ctx.response.status(422).send({ error: 'documents_not_required' })
+      }
+
+      const result = await this.readNamedDocuments(ctx, requirements, { requireAll: true })
+      if (!result.ok) return ctx.response.status(result.status).send(result.body)
+
+      try {
+        return await this.createRegistrationAndRespond(
+          ctx,
+          event,
+          { firstName, lastName, email, quantity, formResponses, frontRedirectUrl },
+          result.documents
+        )
+      } catch (error) {
+        if (error instanceof DocumentsRelayError) {
+          return ctx.response.status(502).send({ error: 'documents_email_failed' })
+        }
+        throw error
+      }
+    })
+  }
+
+  /**
+   * Lit et valide un fichier par exigence nommée (voir
+   * Event.DocumentRequirement) — un champ de formulaire distinct par pièce.
+   * `requireAll` impose la présence de chaque exigence `required`
+   * (inscription initiale, ou renvoi après un vrai rejet) ; à `false`
+   * (complément demandé), au moins un fichier suffit. Les fichiers
+   * temporaires de la requête sont supprimés avant de rendre la main : rien
+   * ne reste sur le disque, les pièces ne vivent plus qu'en mémoire jusqu'à
+   * l'envoi de l'email.
+   */
+  private async readNamedDocuments(
+    ctx: HttpContext,
+    requirements: DocumentRequirement[],
+    options: { requireAll: boolean }
+  ): Promise<
+    | { ok: true; documents: DocumentToRelay[] }
+    | { ok: false; status: number; body: Record<string, unknown> }
+  > {
+    const documents: DocumentToRelay[] = []
+    let totalBytes = 0
+
+    try {
+      for (const req of requirements) {
+        const file = ctx.request.file(req.key, { size: DOCUMENT_MAX_FILE_SIZE, extnames: DOCUMENT_EXTNAMES })
+        if (!file) {
+          if (options.requireAll && req.required) {
+            return { ok: false, status: 422, body: { error: 'document_required', detail: req.key } }
+          }
+          continue
+        }
+        if (!file.isValid) {
+          return { ok: false, status: 422, body: { error: 'invalid_document', detail: file.errors } }
+        }
+        const mimeType = `${file.type}/${file.subtype}`
+        if (!DOCUMENT_ALLOWED_MIME_TYPES.includes(mimeType)) {
+          return { ok: false, status: 422, body: { error: 'invalid_document', detail: 'unsupported_type' } }
+        }
+        const data = await readFile(file.tmpPath!)
+        if (!hasValidDocumentSignature(data, mimeType)) {
+          return { ok: false, status: 422, body: { error: 'invalid_document', detail: 'unsupported_type' } }
+        }
+        totalBytes += data.byteLength
+        if (totalBytes > DOCUMENT_MAX_TOTAL_BYTES) {
+          return { ok: false, status: 422, body: { error: 'documents_too_large' } }
+        }
+        documents.push({ key: req.key, filename: file.clientName, mimeType, data })
+      }
+    } finally {
+      for (const entry of Object.values(ctx.request.allFiles())) {
+        for (const file of Array.isArray(entry) ? entry : [entry]) {
+          if (file.tmpPath) await unlink(file.tmpPath).catch(() => undefined)
+        }
+      }
+    }
+
+    if (documents.length === 0) {
+      return { ok: false, status: 422, body: { error: 'documents_required' } }
+    }
+
+    return { ok: true, documents }
+  }
+
+  /**
    * Vérification de capacité (liste d'attente si complet), puis branche
    * gratuit/payant.
    * Appelée depuis l'intérieur d'un runOnTenant(event.serviceId, ...) déjà
@@ -413,12 +577,17 @@ export default class RegistrationsController {
       quantity: number
       formResponses: Record<string, unknown> | null
       frontRedirectUrl: string
-    }
+    },
+    documents?: DocumentToRelay[]
   ) {
     const { orgId } = ctx.internalAuth
     const totalPriceCents = event.priceCents * input.quantity
     const capacityCheck = await checkCapacity(event, input.quantity)
 
+    // Les pièces partent par email DANS la transaction : si l'envoi échoue
+    // (DocumentsRelayError), l'inscription est annulée (rollback) et
+    // l'appelant répond 502 — pas d'inscription dont l'agent n'a jamais reçu
+    // les pièces.
     if (!capacityCheck.fits) {
       const registration = await currentTenantDb().transaction(async (trx) => {
         const r = await Registration.create(
@@ -437,9 +606,11 @@ export default class RegistrationsController {
             accessToken: randomUUID(),
             waitlistPosition: capacityCheck.waitlistPosition,
             otpVerifiedAt: DateTime.now(),
+            documentsSentAt: documents ? DateTime.now() : null,
           },
           { client: trx }
         )
+        if (documents) await sendDocumentsToAgentEmail(r, event, documents, { resend: false })
         return r
       })
 
@@ -477,21 +648,21 @@ export default class RegistrationsController {
           paymentMethod: isFree ? 'free' : 'payfip',
           accessToken: randomUUID(),
           otpVerifiedAt: DateTime.now(),
+          documentsSentAt: documents ? DateTime.now() : null,
         },
         { client: trx }
       )
       r.paymentReference = buildPaymentReference(event.serviceId, r.id)
       await r.useTransaction(trx).save()
+      if (documents) await sendDocumentsToAgentEmail(r, event, documents, { resend: false })
       return r
     })
 
     if (eventRequiresDocuments(event)) {
-      // awaiting_review : l'agent doit d'abord valider les pièces reçues
-      // par email avant tout paiement (parcours C). Le citoyen reçoit les
-      // consignes d'envoi (adresse + référence à citer).
-      // Pas d'email de notification agent — la cloche du tableau de bord
-      // suffit.
-      await sendDocumentsRequestedEmail(registration, event)
+      // awaiting_review : l'agent doit d'abord valider les pièces, déjà
+      // relayées par email dans la transaction ci-dessus, avant tout
+      // paiement (parcours C). Pas d'email de notification agent en plus —
+      // la cloche du tableau de bord suffit.
       return ctx.response.status(201).send({
         data: {
           registrationId: registration.id,
@@ -575,41 +746,51 @@ export default class RegistrationsController {
   }
 
   /**
-   * POST /registrations/by-token/:accessToken/documents-sent — le citoyen
-   * déclare avoir envoyé ses pièces par email. Ne prouve rien (rien n'est
-   * reçu ici) : sert à signaler à l'agent qu'il peut relire sa messagerie.
-   * Depuis `rejected` (pièces refusées, renvoi annoncé), l'inscription
-   * repasse en `awaiting_review` pour réapparaître dans la file de l'agent.
-   * Idempotent : déclarer deux fois ne change rien.
+   * POST /registrations/by-token/:accessToken/documents — renvoi des pièces
+   * après rejet (parcours C) : uniquement si `status='rejected'` et avant
+   * `documentDeadlineAt`. Les pièces repartent par email à l'agent (rien
+   * n'est stocké) et l'inscription repasse en `awaiting_review`.
    */
-  async declareDocumentsSent(ctx: HttpContext) {
+  async replaceDocuments(ctx: HttpContext) {
     const found = await resolveRegistrationByAccessToken(ctx.internalAuth.orgId, ctx.params.accessToken)
     if (!found) return ctx.response.status(404).send({ error: 'registration_not_found' })
-    const { serviceId, registration } = found
+    const { serviceId, registration, event } = found
 
     return runOnTenant(serviceId, async () => {
-      const wasRejected = registration.status === 'rejected'
-      if (registration.status !== 'awaiting_review' && !wasRejected) {
-        return ctx.response.status(409).send({ error: 'registration_not_awaiting_documents' })
+      if (registration.status !== 'rejected') {
+        return ctx.response.status(409).send({ error: 'registration_not_rejected' })
       }
-      if (wasRejected && registration.documentDeadlineAt && registration.documentDeadlineAt < DateTime.now()) {
+      if (registration.documentDeadlineAt && registration.documentDeadlineAt < DateTime.now()) {
         return ctx.response.status(422).send({ error: 'document_deadline_passed' })
       }
 
-      if (!registration.documentsSentAt) {
-        registration.documentsSentAt = DateTime.now()
-        if (wasRejected) {
-          registration.status = 'awaiting_review'
-          registration.rejectionReason = null
-          registration.documentDeadlineAt = null
-          registration.keepExistingDocuments = false
+      // Vrai rejet : toutes les pièces requises sont à renvoyer. Complément
+      // demandé (keepExistingDocuments) : au moins une pièce suffit, l'agent
+      // a déjà reçu les autres lors de l'envoi initial.
+      const result = await this.readNamedDocuments(ctx, event.documentRequirements ?? [], {
+        requireAll: !registration.keepExistingDocuments,
+      })
+      if (!result.ok) return ctx.response.status(result.status).send(result.body)
+
+      try {
+        await sendDocumentsToAgentEmail(registration, event, result.documents, { resend: true })
+      } catch (error) {
+        if (error instanceof DocumentsRelayError) {
+          return ctx.response.status(502).send({ error: 'documents_email_failed' })
         }
-        await registration.save()
+        throw error
       }
 
-      return ctx.response.send({
-        data: { status: registration.status, documentsSentAt: registration.documentsSentAt.toISO() },
+      registration.merge({
+        status: 'awaiting_review',
+        rejectionReason: null,
+        documentDeadlineAt: null,
+        keepExistingDocuments: false,
+        documentsSentAt: DateTime.now(),
       })
+      await registration.save()
+
+      return ctx.response.send({ data: { status: registration.status } })
     })
   }
 
@@ -674,7 +855,6 @@ export default class RegistrationsController {
         if (eventRequiresDocuments(event)) {
           registration.status = 'awaiting_review'
           await registration.save()
-          await sendDocumentsRequestedEmail(registration, event)
           return ctx.response.send({ data: { status: registration.status } })
         }
 

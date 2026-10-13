@@ -167,9 +167,7 @@ export async function sendRegistrationRejectionEmail(
         eventTitle: event.title,
         rejectionReason: registration.rejectionReason,
         documentDeadlineAt: registration.documentDeadlineAt?.toFormat('dd/MM/yyyy'),
-        contactEmail: event.documentContactEmail,
-        registrationReference: registration.paymentReference ?? String(registration.id),
-        statusUrl: buildFrontUrl(identity.slug, registration.serviceId, registration.accessToken!, registration.orgId),
+        redepositUrl: buildFrontUrl(identity.slug, registration.serviceId, registration.accessToken!, registration.orgId),
         serviceName: identity.name,
         orgName: identity.orgName,
         logoUrl: identity.logoUrl,
@@ -178,33 +176,60 @@ export async function sendRegistrationRejectionEmail(
   )
 }
 
+export class DocumentsRelayError extends Error {}
+
+export interface DocumentToRelay {
+  key: string
+  filename: string
+  mimeType: string
+  data: Buffer
+}
+
 /**
- * Consignes d'envoi des pièces par email, envoyées quand l'inscription
- * passe en `awaiting_review` (inscription directe, ou offre de liste
- * d'attente acceptée). Best-effort, sans ticket de retry : contrairement
- * aux autres emails du parcours, un échec ici n'est pas bloquant — les
- * mêmes consignes restent affichées sur la page de suivi de l'inscription.
+ * Relaie les pièces justificatives du citoyen par email à l'agent (adresse de
+ * réception de l'évènement, copies comprises), depuis le domaine du service
+ * via svc-mail. AUCUNE pièce n'est stockée : envoi éphémère (svc-mail n'écrit
+ * pas les pièces jointes en base et ne rejoue pas un échec). Volontairement
+ * SANS ticket de retry, contrairement aux autres emails : si l'envoi échoue,
+ * on lève DocumentsRelayError et l'appelant annule l'inscription — le citoyen
+ * redépose, plutôt qu'une inscription sans que l'agent ait jamais reçu ses
+ * pièces.
  */
-export async function sendDocumentsRequestedEmail(
+export async function sendDocumentsToAgentEmail(
   registration: Registration,
-  event: Event
+  event: Event,
+  documents: DocumentToRelay[],
+  options: { resend: boolean }
 ): Promise<void> {
-  if (!event.documentContactEmail || !event.documentRequirements?.length) return
+  if (!event.documentContactEmail) {
+    throw new DocumentsRelayError('Aucune adresse de réception des pièces pour cet évènement')
+  }
+
+  const labelByKey = new Map((event.documentRequirements ?? []).map((r) => [r.key, r.label]))
 
   try {
     const identity = await loadServiceIdentity(registration.orgId, registration.serviceId)
 
     await sendMail({
-      template: 'inscription_documents_requested',
-      to: registration.email,
+      template: 'inscription_documents_received',
+      to: event.documentContactEmail,
+      cc: event.documentContactCc ?? [],
+      ephemeral: true,
       serviceId: String(registration.serviceId),
+      attachments: documents.map((doc) => ({
+        // "Pièce d'identité - scan.pdf" : le libellé de l'exigence d'abord,
+        // pour que l'agent sache à quelle pièce chaque fichier répond.
+        filename: `${labelByKey.get(doc.key) ?? doc.key} - ${doc.filename}`.replace(/[\\/:*?"<>|]/g, '_'),
+        contentBase64: doc.data.toString('base64'),
+        contentType: doc.mimeType,
+      })),
       data: {
-        email: registration.email,
         eventTitle: event.title,
-        documents: event.documentRequirements.map((requirement) => requirement.label),
-        contactEmail: event.documentContactEmail,
+        participantName: `${registration.firstName} ${registration.lastName}`,
+        participantEmail: registration.email,
         registrationReference: registration.paymentReference ?? String(registration.id),
-        statusUrl: buildFrontUrl(identity.slug, registration.serviceId, registration.accessToken!, registration.orgId),
+        documents: (event.documentRequirements ?? []).map((requirement) => requirement.label),
+        resend: options.resend,
         serviceName: identity.name,
         orgName: identity.orgName,
         logoUrl: identity.logoUrl,
@@ -213,8 +238,9 @@ export async function sendDocumentsRequestedEmail(
   } catch (error) {
     logger.warn(
       { registrationId: registration.id, error },
-      "registration_mail_service: échec d'envoi des consignes de pièces (non bloquant)"
+      "registration_mail_service: échec du relais des pièces justificatives par email"
     )
+    throw new DocumentsRelayError('Échec du relais des pièces par email')
   }
 }
 
